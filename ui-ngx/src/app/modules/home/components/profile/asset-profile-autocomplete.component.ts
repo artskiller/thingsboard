@@ -1,19 +1,6 @@
-///
-/// Copyright © 2016-2023 The Thingsboard Authors
-///
-/// Licensed under the Apache License, Version 2.0 (the "License");
-/// you may not use this file except in compliance with the License.
-/// You may obtain a copy of the License at
-///
-///     http://www.apache.org/licenses/LICENSE-2.0
-///
-/// Unless required by applicable law or agreed to in writing, software
-/// distributed under the License is distributed on an "AS IS" BASIS,
-/// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-/// See the License for the specific language governing permissions and
-/// limitations under the License.
-///
-
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
+// SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
 import {
   Component,
   ElementRef,
@@ -25,7 +12,7 @@ import {
   Output,
   ViewChild
 } from '@angular/core';
-import { ControlValueAccessor, UntypedFormBuilder, UntypedFormGroup, NG_VALUE_ACCESSOR } from '@angular/forms';
+import { ControlValueAccessor, NG_VALUE_ACCESSOR, UntypedFormBuilder, UntypedFormGroup } from '@angular/forms';
 import { Observable, of } from 'rxjs';
 import { PageLink } from '@shared/models/page/page-link';
 import { Direction } from '@shared/models/page/sort-order';
@@ -33,7 +20,6 @@ import { catchError, debounceTime, distinctUntilChanged, map, share, switchMap, 
 import { Store } from '@ngrx/store';
 import { AppState } from '@app/core/core.state';
 import { TranslateService } from '@ngx-translate/core';
-import { coerceBooleanProperty } from '@angular/cdk/coercion';
 import { entityIdEquals } from '@shared/models/id/entity-id';
 import { TruncatePipe } from '@shared//pipe/truncate.pipe';
 import { ENTER } from '@angular/cdk/keycodes';
@@ -45,20 +31,29 @@ import { AssetProfileId } from '@shared/models/id/asset-profile-id';
 import { AssetProfile, AssetProfileInfo } from '@shared/models/asset.models';
 import { AssetProfileService } from '@core/http/asset-profile.service';
 import { AssetProfileDialogComponent, AssetProfileDialogData } from './asset-profile-dialog.component';
-import { SubscriptSizing } from '@angular/material/form-field';
+import { MatFormFieldAppearance, SubscriptSizing } from '@angular/material/form-field';
+import { Operation, Resource } from '@shared/models/security.models';
 import { coerceBoolean } from '@shared/decorators/coercion';
+import { AuthUser } from '@shared/models/user.model';
+import { getCurrentAuthUser } from '@core/auth/auth.selectors';
+import { Authority } from '@shared/models/authority.enum';
 
 @Component({
-  selector: 'tb-asset-profile-autocomplete',
-  templateUrl: './asset-profile-autocomplete.component.html',
-  styleUrls: ['./asset-profile-autocomplete.component.scss'],
-  providers: [{
-    provide: NG_VALUE_ACCESSOR,
-    useExisting: forwardRef(() => AssetProfileAutocompleteComponent),
-    multi: true
-  }]
+    selector: 'tb-asset-profile-autocomplete',
+    templateUrl: './asset-profile-autocomplete.component.html',
+    styleUrls: ['./asset-profile-autocomplete.component.scss'],
+    providers: [{
+            provide: NG_VALUE_ACCESSOR,
+            useExisting: forwardRef(() => AssetProfileAutocompleteComponent),
+            multi: true
+        }],
+    standalone: false
 })
 export class AssetProfileAutocompleteComponent implements ControlValueAccessor, OnInit {
+
+  resource = Resource;
+
+  operation = Operation;
 
   selectAssetProfileFormGroup: UntypedFormGroup;
 
@@ -95,6 +90,9 @@ export class AssetProfileAutocompleteComponent implements ControlValueAccessor, 
   @Input()
   hint: string;
 
+  @Input()
+  appearance: MatFormFieldAppearance = 'fill';
+
   @Output()
   assetProfileUpdated = new EventEmitter<AssetProfileId>();
 
@@ -109,6 +107,10 @@ export class AssetProfileAutocompleteComponent implements ControlValueAccessor, 
 
   searchText = '';
   assetProfileURL: string;
+
+  useAssetProfileLink = true;
+
+  private authUser: AuthUser;
 
   private dirty = false;
 
@@ -128,6 +130,10 @@ export class AssetProfileAutocompleteComponent implements ControlValueAccessor, 
               private fb: UntypedFormBuilder,
               private zone: NgZone,
               private dialog: MatDialog) {
+    this.authUser = getCurrentAuthUser(this.store);
+    if (this.authUser.authority === Authority.CUSTOMER_USER) {
+      this.useAssetProfileLink = false;
+    }
     this.selectAssetProfileFormGroup = this.fb.group({
       assetProfile: [null]
     });
@@ -226,7 +232,9 @@ export class AssetProfileAutocompleteComponent implements ControlValueAccessor, 
       this.assetProfileService.getAssetProfileInfo(value.id).subscribe(
         (profile) => {
           this.modelValue = new AssetProfileId(profile.id.id);
-          this.assetProfileURL = getEntityDetailsPageURL(this.modelValue.id, this.modelValue.entityType);
+          if (this.useAssetProfileLink) {
+            this.assetProfileURL = getEntityDetailsPageURL(this.modelValue.id, this.modelValue.entityType);
+          }
           this.selectAssetProfileFormGroup.get('assetProfile').patchValue(profile, {emitEvent: false});
           this.assetProfileChanged.emit(profile);
         }
@@ -315,7 +323,7 @@ export class AssetProfileAutocompleteComponent implements ControlValueAccessor, 
   }
 
   createAssetProfile($event: Event, profileName: string) {
-    $event.preventDefault();
+    $event.stopPropagation();
     const assetProfile: AssetProfile = {
       name: profileName
     } as AssetProfile;
@@ -325,7 +333,7 @@ export class AssetProfileAutocompleteComponent implements ControlValueAccessor, 
   }
 
   editAssetProfile($event: Event) {
-    $event.preventDefault();
+    $event.stopPropagation();
     this.assetProfileService.getAssetProfile(this.modelValue.id).subscribe(
       (assetProfile) => {
         this.openAssetProfileDialog(assetProfile, false);

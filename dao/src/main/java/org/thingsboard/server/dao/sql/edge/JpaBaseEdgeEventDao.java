@@ -1,22 +1,12 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
+// SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
 package org.thingsboard.server.dao.sql.edge;
 
 import com.datastax.oss.driver.api.core.uuid.Uuids;
 import com.google.common.util.concurrent.ListenableFuture;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -35,19 +25,16 @@ import org.thingsboard.server.dao.DaoUtil;
 import org.thingsboard.server.dao.edge.EdgeEventDao;
 import org.thingsboard.server.dao.model.ModelConstants;
 import org.thingsboard.server.dao.model.sql.EdgeEventEntity;
-import org.thingsboard.server.dao.sql.JpaAbstractDao;
+import org.thingsboard.server.dao.sql.JpaPartitionedAbstractDao;
 import org.thingsboard.server.dao.sql.ScheduledLogExecutorComponent;
 import org.thingsboard.server.dao.sql.TbSqlBlockingQueueParams;
 import org.thingsboard.server.dao.sql.TbSqlBlockingQueueWrapper;
 import org.thingsboard.server.dao.sqlts.insert.sql.SqlPartitioningRepository;
 import org.thingsboard.server.dao.util.SqlDao;
 
-import javax.annotation.PostConstruct;
-import javax.annotation.PreDestroy;
-import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
@@ -58,7 +45,7 @@ import static org.thingsboard.server.dao.model.ModelConstants.NULL_UUID;
 @SqlDao
 @RequiredArgsConstructor
 @Slf4j
-public class JpaBaseEdgeEventDao extends JpaAbstractDao<EdgeEventEntity, EdgeEvent> implements EdgeEventDao {
+public class JpaBaseEdgeEventDao extends JpaPartitionedAbstractDao<EdgeEventEntity, EdgeEvent> implements EdgeEventDao {
 
     private final UUID systemTenantId = NULL_UUID;
 
@@ -90,8 +77,9 @@ public class JpaBaseEdgeEventDao extends JpaAbstractDao<EdgeEventEntity, EdgeEve
     private long edgeEventsTtl;
 
     private static final String TABLE_NAME = ModelConstants.EDGE_EVENT_TABLE_NAME;
+    private static final List<SortOrder> SORT_ORDERS = Collections.singletonList(new SortOrder("seqId"));
 
-    private TbSqlBlockingQueueWrapper<EdgeEventEntity> queue;
+    private TbSqlBlockingQueueWrapper<EdgeEventEntity, Void> queue;
 
     @Override
     protected Class<EdgeEventEntity> getEntityClass() {
@@ -135,7 +123,7 @@ public class JpaBaseEdgeEventDao extends JpaAbstractDao<EdgeEventEntity, EdgeEve
 
     @Override
     public ListenableFuture<Void> saveAsync(EdgeEvent edgeEvent) {
-        log.debug("Save edge event [{}] ", edgeEvent);
+        log.debug("Saving EdgeEvent [{}] ", edgeEvent);
         if (edgeEvent.getId() == null) {
             UUID timeBased = Uuids.timeBased();
             edgeEvent.setId(new EdgeEventId(timeBased));
@@ -151,12 +139,13 @@ public class JpaBaseEdgeEventDao extends JpaAbstractDao<EdgeEventEntity, EdgeEve
         if (StringUtils.isEmpty(edgeEvent.getUid())) {
             edgeEvent.setUid(edgeEvent.getId().toString());
         }
-        partitioningRepository.createPartitionIfNotExists(TABLE_NAME, edgeEvent.getCreatedTime(), TimeUnit.HOURS.toMillis(partitionSizeInHours));
-        return save(new EdgeEventEntity(edgeEvent));
+        EdgeEventEntity entity = new EdgeEventEntity(edgeEvent);
+        createPartition(entity);
+        return save(entity);
     }
 
     private ListenableFuture<Void> save(EdgeEventEntity entity) {
-        log.debug("Save edge event [{}] ", entity);
+        log.debug("Saving EdgeEventEntity [{}] ", entity);
         if (entity.getTenantId() == null) {
             log.trace("Save system edge event with predefined id {}", systemTenantId);
             entity.setTenantId(systemTenantId);
@@ -175,22 +164,17 @@ public class JpaBaseEdgeEventDao extends JpaAbstractDao<EdgeEventEntity, EdgeEve
 
     @Override
     public PageData<EdgeEvent> findEdgeEvents(UUID tenantId, EdgeId edgeId, Long seqIdStart, Long seqIdEnd, TimePageLink pageLink) {
-        List<SortOrder> sortOrders = new ArrayList<>();
-        if (pageLink.getSortOrder() != null) {
-            sortOrders.add(pageLink.getSortOrder());
-        }
-        sortOrders.add(new SortOrder("seqId"));
         return DaoUtil.toPageData(
                 edgeEventRepository
                         .findEdgeEventsByTenantIdAndEdgeId(
                                 tenantId,
                                 edgeId.getId(),
-                                Objects.toString(pageLink.getTextSearch(), ""),
+                                pageLink.getTextSearch(),
                                 pageLink.getStartTime(),
                                 pageLink.getEndTime(),
                                 seqIdStart,
                                 seqIdEnd,
-                                DaoUtil.toPageable(pageLink, sortOrders)));
+                                DaoUtil.toPageable(pageLink, SORT_ORDERS)));
     }
 
     @Override
@@ -227,4 +211,10 @@ public class JpaBaseEdgeEventDao extends JpaAbstractDao<EdgeEventEntity, EdgeEve
     private void callMigrationFunction(long startTime, long endTime, long partitionSIzeInMs) {
         jdbcTemplate.update("CALL migrate_edge_event(?, ?, ?)", startTime, endTime, partitionSIzeInMs);
     }
+
+    @Override
+    public void createPartition(EdgeEventEntity entity) {
+        partitioningRepository.createPartitionIfNotExists(TABLE_NAME, entity.getCreatedTime(), TimeUnit.HOURS.toMillis(partitionSizeInHours));
+    }
+
 }

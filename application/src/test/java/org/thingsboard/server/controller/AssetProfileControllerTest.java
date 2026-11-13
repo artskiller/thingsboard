@@ -1,18 +1,6 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
+// SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
 package org.thingsboard.server.controller;
 
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -23,11 +11,15 @@ import org.junit.Test;
 import org.mockito.AdditionalAnswers;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.test.context.ContextConfiguration;
+import org.thingsboard.common.util.JacksonUtil;
 import org.thingsboard.server.common.data.Customer;
 import org.thingsboard.server.common.data.Dashboard;
+import org.thingsboard.server.common.data.EntityInfo;
+import org.thingsboard.server.common.data.EntityType;
 import org.thingsboard.server.common.data.StringUtils;
 import org.thingsboard.server.common.data.Tenant;
 import org.thingsboard.server.common.data.User;
@@ -35,22 +27,43 @@ import org.thingsboard.server.common.data.asset.Asset;
 import org.thingsboard.server.common.data.asset.AssetProfile;
 import org.thingsboard.server.common.data.asset.AssetProfileInfo;
 import org.thingsboard.server.common.data.audit.ActionType;
+import org.thingsboard.server.common.data.exception.ThingsboardErrorCode;
+import org.thingsboard.server.common.data.exception.ThingsboardException;
+import org.thingsboard.server.common.data.group.EntityGroup;
 import org.thingsboard.server.common.data.id.AssetProfileId;
+import org.thingsboard.server.common.data.id.UserId;
 import org.thingsboard.server.common.data.page.PageData;
 import org.thingsboard.server.common.data.page.PageLink;
+import org.thingsboard.server.common.data.permission.GroupPermission;
+import org.thingsboard.server.common.data.permission.MergedUserPermissions;
+import org.thingsboard.server.common.data.permission.Operation;
+import org.thingsboard.server.common.data.permission.Resource;
+import org.thingsboard.server.common.data.role.Role;
+import org.thingsboard.server.common.data.role.RoleType;
 import org.thingsboard.server.common.data.rule.RuleChain;
 import org.thingsboard.server.common.data.security.Authority;
 import org.thingsboard.server.dao.asset.AssetProfileDao;
-import org.thingsboard.server.dao.exception.DataValidationException;
 import org.thingsboard.server.dao.service.DaoSqlTest;
+import org.thingsboard.server.exception.DataValidationException;
+import org.thingsboard.server.service.security.permission.UserPermissionsService;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.function.Function;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.doReturn;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.thingsboard.server.common.data.DataConstants.DEFAULT_DEVICE_TYPE;
 
 @ContextConfiguration(classes = {AssetProfileControllerTest.Config.class})
 @DaoSqlTest
@@ -64,6 +77,9 @@ public class AssetProfileControllerTest extends AbstractControllerTest {
 
     @Autowired
     private AssetProfileDao assetProfileDao;
+
+    @MockitoSpyBean
+    private UserPermissionsService userPermissionsService;
 
     static class Config {
         @Bean
@@ -79,7 +95,7 @@ public class AssetProfileControllerTest extends AbstractControllerTest {
 
         Tenant tenant = new Tenant();
         tenant.setTitle("My tenant");
-        savedTenant = doPost("/api/tenant", tenant, Tenant.class);
+        savedTenant = saveTenant(tenant);
         Assert.assertNotNull(savedTenant);
 
         tenantAdmin = new User();
@@ -96,8 +112,7 @@ public class AssetProfileControllerTest extends AbstractControllerTest {
     public void afterTest() throws Exception {
         loginSysAdmin();
 
-        doDelete("/api/tenant/" + savedTenant.getId().getId().toString())
-                .andExpect(status().isOk());
+        deleteTenant(savedTenant.getId());
     }
 
     @Test
@@ -155,6 +170,7 @@ public class AssetProfileControllerTest extends AbstractControllerTest {
 
     @Test
     public void whenGetAssetProfileById_thenPermissionsAreChecked() throws Exception {
+        loginTenantAdmin();
         AssetProfile assetProfile = createAssetProfile("Asset profile 1");
         assetProfile = doPost("/api/assetProfile", assetProfile, AssetProfile.class);
 
@@ -162,7 +178,26 @@ public class AssetProfileControllerTest extends AbstractControllerTest {
 
         doGet("/api/assetProfile/" + assetProfile.getId())
                 .andExpect(status().isForbidden())
-                .andExpect(statusReason(containsString(msgErrorPermission)));
+                .andExpect(statusReason(containsString(msgErrorPermissionRead + "ASSET_PROFILE" + " '" + assetProfile.getName() + "'!")));
+
+        loginTenantAdmin();
+        User otherTenantUser = new User();
+        otherTenantUser.setEmail("tenant-user@thingsboard.org");
+        otherTenantUser.setAuthority(Authority.TENANT_ADMIN);
+        otherTenantUser.setTenantId(tenantId);
+        otherTenantUser = createUser(otherTenantUser, "12345678");
+        Map<Resource, Set<Operation>> permissions = Map.of(Resource.ASSET_PROFILE, Set.of(Operation.READ));
+        mockUserPermissions(otherTenantUser.getId(), permissions);
+
+        login(otherTenantUser.getEmail(), "12345678");
+        doGet("/api/assetProfile/" + assetProfile.getId())
+                .andExpect(status().isOk());
+
+        permissions = Map.of(Resource.ASSET, Set.of(Operation.READ));
+        mockUserPermissions(otherTenantUser.getId(), permissions);
+        doGet("/api/assetProfile/" + assetProfile.getId())
+                .andExpect(status().isForbidden())
+                .andExpect(statusReason(containsString(msgErrorPermissionRead + "ASSET_PROFILE" + " '" + assetProfile.getName() + "'!")));
     }
 
     @Test
@@ -173,24 +208,51 @@ public class AssetProfileControllerTest extends AbstractControllerTest {
         Assert.assertNotNull(foundAssetProfileInfo);
         Assert.assertEquals(savedAssetProfile.getId(), foundAssetProfileInfo.getId());
         Assert.assertEquals(savedAssetProfile.getName(), foundAssetProfileInfo.getName());
+    }
 
-        Customer customer = new Customer();
-        customer.setTitle("Customer");
-        customer.setTenantId(savedTenant.getId());
-        Customer savedCustomer = doPost("/api/customer", customer, Customer.class);
+    @Test
+    public void testFindAssetProfileInfoById_NewCustomerNewUser() throws Exception {
+        AssetProfile assetProfile = this.createAssetProfile("Asset Profile");
+        AssetProfile savedAssetProfile = doPost("/api/assetProfile", assetProfile, AssetProfile.class);
 
-        User customerUser = new User();
-        customerUser.setAuthority(Authority.CUSTOMER_USER);
-        customerUser.setTenantId(savedTenant.getId());
-        customerUser.setCustomerId(savedCustomer.getId());
-        customerUser.setEmail("customer2@thingsboard.org");
+        loginNewCustomerNewUser();
 
-        createUserAndLogin(customerUser, "customer");
-
-        foundAssetProfileInfo = doGet("/api/assetProfileInfo/" + savedAssetProfile.getId().getId().toString(), AssetProfileInfo.class);
+        AssetProfileInfo foundAssetProfileInfo = doGet("/api/assetProfileInfo/" + savedAssetProfile.getId().getId().toString(), AssetProfileInfo.class);
         Assert.assertNotNull(foundAssetProfileInfo);
         Assert.assertEquals(savedAssetProfile.getId(), foundAssetProfileInfo.getId());
         Assert.assertEquals(savedAssetProfile.getName(), foundAssetProfileInfo.getName());
+    }
+
+    @Test
+    public void testFindAssetProfileInfoByIds() throws Exception {
+        List<AssetProfileInfo> assetProfiles = new ArrayList<>();
+        for (int i = 0; i < 20; i++) {
+            AssetProfile assetProfile = this.createAssetProfile("Asset Profile" + i);
+            assetProfile.setTenantId(savedTenant.getId());
+            assetProfiles.add(doPost("/api/assetProfile", assetProfile, AssetProfileInfo.class));
+        }
+
+        List<AssetProfileInfo> expected = assetProfiles.subList(5, 15);
+
+        String idsParam = expected.stream()
+                .map(ap -> ap.getId().getId().toString())
+                .collect(Collectors.joining(","));
+        AssetProfileInfo[] foundAssetProfileInfos = doGet("/api/assetProfileInfos?assetProfileIds=" + idsParam, AssetProfileInfo[].class);
+
+        Assert.assertNotNull(foundAssetProfileInfos);
+        Assert.assertEquals(expected.size(), foundAssetProfileInfos.length);
+
+        Map<UUID, AssetProfileInfo> infoById = Arrays.stream(foundAssetProfileInfos)
+                .collect(Collectors.toMap(info -> info.getId().getId(), Function.identity()));
+
+        for (AssetProfileInfo assetProfileInfo : expected) {
+            UUID id = assetProfileInfo.getId().getId();
+            AssetProfileInfo info = infoById.get(id);
+            Assert.assertNotNull("AssetProfileInfo not found for id " + id, info);
+
+            Assert.assertEquals(assetProfileInfo.getId(), info.getId());
+            Assert.assertEquals(assetProfileInfo.getName(), info.getName());
+        }
     }
 
     @Test
@@ -201,7 +263,7 @@ public class AssetProfileControllerTest extends AbstractControllerTest {
         loginDifferentTenant();
         doGet("/api/assetProfileInfo/" + assetProfile.getId())
                 .andExpect(status().isForbidden())
-                .andExpect(statusReason(containsString(msgErrorPermission)));
+                .andExpect(statusReason(containsString(UserController.YOU_DON_T_HAVE_PERMISSION_TO_PERFORM_THIS_OPERATION)));
     }
 
     @Test
@@ -395,6 +457,30 @@ public class AssetProfileControllerTest extends AbstractControllerTest {
     }
 
     @Test
+    public void whenFindAssetProfiles_thenPermissionsAreChecked() throws Exception {
+        loginTenantAdmin();
+        AssetProfile assetProfile = createAssetProfile("Asset profile 1");
+
+        User otherTenantUser = new User();
+        otherTenantUser.setEmail("tenant-user@thingsboard.org");
+        otherTenantUser.setAuthority(Authority.TENANT_ADMIN);
+        otherTenantUser.setTenantId(tenantId);
+        otherTenantUser = createUser(otherTenantUser, "12345678");
+        Map<Resource, Set<Operation>> permissions = Map.of(Resource.ALL, Set.of(Operation.READ));
+        mockUserPermissions(otherTenantUser.getId(), permissions);
+
+        login(otherTenantUser.getEmail(), "12345678");
+        doGet("/api/assetProfiles?pageSize=10&page=0")
+                .andExpect(status().isOk());
+
+        permissions = Map.of(Resource.ASSET, Set.of(Operation.READ));
+        mockUserPermissions(otherTenantUser.getId(), permissions);
+        doGet("/api/assetProfiles?pageSize=10&page=0")
+                .andExpect(status().isForbidden())
+                .andExpect(statusReason(containsString(msgErrorPermissionRead + "'ASSET_PROFILE' resource!")));
+    }
+
+    @Test
     public void testFindAssetProfileInfos() throws Exception {
         List<AssetProfile> assetProfiles = new ArrayList<>();
         PageLink pageLink = new PageLink(17);
@@ -447,6 +533,56 @@ public class AssetProfileControllerTest extends AbstractControllerTest {
         Assert.assertEquals(1, pageData.getTotalElements());
     }
 
+    protected void mockUserPermissions(UserId userId, Map<Resource, Set<Operation>> permissions) throws ThingsboardException {
+        MergedUserPermissions mergedUserPermissions = new MergedUserPermissions(permissions, Collections.emptyMap());
+        doReturn(mergedUserPermissions).when(userPermissionsService)
+                .getMergedPermissions(argThat(user -> user.getId().equals(userId)), anyBoolean());
+    }
+
+    private void loginNewCustomerNewUser() throws Exception {
+
+        Customer customer = new Customer();
+        customer.setTitle("Customer");
+        customer.setTenantId(savedTenant.getId());
+        Customer savedCustomer = doPost("/api/customer", customer, Customer.class);
+
+        Role role = new Role();
+        role.setTenantId(savedTenant.getId());
+        role.setCustomerId(savedCustomer.getId());
+        role.setType(RoleType.GENERIC);
+        role.setName("Test customer administrator");
+        role.setPermissions(JacksonUtil.toJsonNode("{\"ALL\":[\"ALL\"]}"));
+
+        role = doPost("/api/role", role, Role.class);
+
+        EntityGroup entityGroup = new EntityGroup();
+        entityGroup.setName("Test customer administrators");
+        entityGroup.setType(EntityType.USER);
+        entityGroup.setOwnerId(savedCustomer.getId());
+        entityGroup = doPost("/api/entityGroup", entityGroup, EntityGroup.class);
+
+        GroupPermission groupPermission = new GroupPermission(
+                tenantId,
+                entityGroup.getId(),
+                role.getId(),
+                null,
+                null,
+                false
+        );
+
+        doPost("/api/groupPermission", groupPermission, GroupPermission.class);
+
+        User customerUser = new User();
+        customerUser.setAuthority(Authority.CUSTOMER_USER);
+        customerUser.setTenantId(savedTenant.getId());
+        customerUser.setCustomerId(savedCustomer.getId());
+        customerUser.setEmail("customer2@thingsboard.org");
+
+        createUser(customerUser, "customer", entityGroup.getId());
+
+        login("customer2@thingsboard.org", "customer");
+    }
+
     @Test
     public void testDeleteAssetProfileWithDeleteRelationsOk() throws Exception {
         AssetProfileId assetProfileId = savedAssetProfile("AssetProfile for Test WithRelationsOk").getId();
@@ -457,6 +593,62 @@ public class AssetProfileControllerTest extends AbstractControllerTest {
     public void testDeleteAssetProfileExceptionWithRelationsTransactional() throws Exception {
         AssetProfileId assetProfileId = savedAssetProfile("AssetProfile for Test WithRelations Transactional Exception").getId();
         testEntityDaoWithRelationsTransactionalException(assetProfileDao, savedTenant.getId(), assetProfileId, "/api/assetProfile/" + assetProfileId);
+    }
+
+    @Test
+    public void testGetAssetProfileNames() throws Exception {
+        var pageLink = new PageLink(Integer.MAX_VALUE);
+        var assetProfileInfos = doGetTypedWithPageLink("/api/assetProfileInfos?",
+                new TypeReference<PageData<AssetProfileInfo>>() {
+                }, pageLink);
+        Assert.assertNotNull("Asset Profile Infos page data is null!", assetProfileInfos);
+        Assert.assertEquals("Asset Profile Infos Page data is empty! Expected to have default profile created!", 1, assetProfileInfos.getTotalElements());
+        List<EntityInfo> expectedAssetProfileNames = assetProfileInfos.getData().stream()
+                .map(info -> new EntityInfo(info.getId(), info.getName()))
+                .sorted(Comparator.comparing(EntityInfo::getName))
+                .collect(Collectors.toList());
+        var assetProfileNames = doGetTyped("/api/assetProfile/names", new TypeReference<List<EntityInfo>>() {
+        });
+        Assert.assertNotNull("Asset Profile Names list is null!", assetProfileNames);
+        Assert.assertFalse("Asset Profile Names list is empty!", assetProfileNames.isEmpty());
+        Assert.assertEquals(expectedAssetProfileNames, assetProfileNames);
+        Assert.assertEquals(1, assetProfileNames.size());
+        Assert.assertEquals(DEFAULT_DEVICE_TYPE, assetProfileNames.get(0).getName());
+
+        int count = 3;
+        for (int i = 0; i < count; i++) {
+            Asset asset = new Asset();
+            asset.setName("AssetName" + i);
+            asset.setType("AssetProfileName" + i);
+            Asset savedAsset = doPost("/api/asset", asset, Asset.class);
+            Assert.assertNotNull(savedAsset);
+        }
+        assetProfileInfos = doGetTypedWithPageLink("/api/assetProfileInfos?",
+                new TypeReference<>() {
+                }, pageLink);
+        Assert.assertNotNull("Asset Profile Infos page data is null!", assetProfileInfos);
+        Assert.assertEquals("Asset Profile Infos Page data is empty! Expected to have default profile created + count value!", 1 + count, assetProfileInfos.getTotalElements());
+        expectedAssetProfileNames = assetProfileInfos.getData().stream()
+                .map(info -> new EntityInfo(info.getId(), info.getName()))
+                .sorted(Comparator.comparing(EntityInfo::getName))
+                .collect(Collectors.toList());
+
+        assetProfileNames = doGetTyped("/api/assetProfile/names", new TypeReference<>() {
+        });
+        Assert.assertNotNull("Asset Profile Names list is null!", assetProfileNames);
+        Assert.assertFalse("Asset Profile Names list is empty!", assetProfileNames.isEmpty());
+        Assert.assertEquals(expectedAssetProfileNames, assetProfileNames);
+        Assert.assertEquals(1 + count, assetProfileNames.size());
+
+        assetProfileNames = doGetTyped("/api/assetProfile/names?activeOnly=true", new TypeReference<>() {
+        });
+        Assert.assertNotNull("Asset Profile Names list is null!", assetProfileNames);
+        Assert.assertFalse("Asset Profile Names list is empty!", assetProfileNames.isEmpty());
+        var expectedAssetProfileNamesWithoutDefault = expectedAssetProfileNames.stream()
+                .filter(entityInfo -> !entityInfo.getName().equals(DEFAULT_DEVICE_TYPE))
+                .collect(Collectors.toList());
+        Assert.assertEquals(expectedAssetProfileNamesWithoutDefault, assetProfileNames);
+        Assert.assertEquals(count, assetProfileNames.size());
     }
 
     private AssetProfile savedAssetProfile(String name) {

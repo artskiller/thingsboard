@@ -1,18 +1,5 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-License-Identifier: Apache-2.0
 package org.thingsboard.server.dao.sql.event;
 
 import com.datastax.oss.driver.api.core.uuid.Uuids;
@@ -27,6 +14,7 @@ import org.thingsboard.server.common.data.page.PageData;
 import org.thingsboard.server.common.data.page.TimePageLink;
 import org.thingsboard.server.dao.AbstractJpaDaoTest;
 import org.thingsboard.server.dao.event.EventDao;
+import org.thingsboard.server.dao.model.sql.RuleNodeDebugEventEntity;
 
 import java.util.List;
 import java.util.UUID;
@@ -42,6 +30,10 @@ public class JpaBaseEventDaoTest extends AbstractJpaDaoTest {
 
     @Autowired
     private EventDao eventDao;
+
+    @Autowired
+    private RuleNodeDebugEventRepository ruleNodeDebugEventRepository;
+
     UUID tenantId = Uuids.timeBased();
 
 
@@ -106,15 +98,41 @@ public class JpaBaseEventDaoTest extends AbstractJpaDaoTest {
 
     }
 
+    @Test
+    public void findLatestDebugRuleNodeInEvent() throws Exception {
+
+        UUID entityId = Uuids.timeBased();
+
+        RuleNodeDebugEventEntity event = getDebugInEventEntity(Uuids.timeBased(), tenantId, entityId);
+        eventDao.saveAsync(event.toData()).get(1, TimeUnit.MINUTES);
+        Thread.sleep(2);
+        RuleNodeDebugEventEntity event2 = getDebugInEventEntity(Uuids.timeBased(), tenantId, entityId);
+        eventDao.saveAsync(event2.toData()).get(1, TimeUnit.MINUTES);
+
+        RuleNodeDebugEventEntity foundEvent = ruleNodeDebugEventRepository.findLatestDebugRuleNodeInEvent(tenantId, entityId).get();
+        assertNotNull("Events expected to be not null", foundEvent);
+        assertEquals(event2.getEventType(), foundEvent.getEventType());
+        assertEquals(event2.getId(), foundEvent.getId());
+    }
+
     private Event getStatsEvent(UUID eventId, UUID tenantId, UUID entityId) {
         StatisticsEvent.StatisticsEventBuilder event = StatisticsEvent.builder();
         event.id(eventId);
         event.ts(System.currentTimeMillis());
-        event.tenantId(new TenantId(tenantId));
+        event.tenantId(TenantId.fromUUID(tenantId));
         event.entityId(entityId);
         event.serviceId("server A");
         event.messagesProcessed(1);
         event.errorsOccurred(0);
         return event.build();
+    }
+
+    private RuleNodeDebugEventEntity getDebugInEventEntity(UUID eventId, UUID tenantId, UUID entityId) {
+        RuleNodeDebugEventEntity event = new RuleNodeDebugEventEntity();
+        event.setId(eventId);
+        event.setEventType("IN");
+        event.setEntityId(entityId);
+        event.setTenantId(tenantId);
+        return event;
     }
 }

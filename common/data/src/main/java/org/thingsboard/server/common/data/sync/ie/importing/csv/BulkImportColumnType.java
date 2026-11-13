@@ -1,22 +1,10 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
+// SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
 package org.thingsboard.server.common.data.sync.ie.importing.csv;
 
 import lombok.Getter;
-import org.thingsboard.server.common.data.DataConstants;
+import org.thingsboard.server.common.data.AttributeScope;
 import org.thingsboard.server.common.data.device.credentials.lwm2m.LwM2MSecurityMode;
 
 @Getter
@@ -24,8 +12,8 @@ public enum BulkImportColumnType {
     NAME,
     TYPE,
     LABEL,
-    SHARED_ATTRIBUTE(DataConstants.SHARED_SCOPE, true),
-    SERVER_ATTRIBUTE(DataConstants.SERVER_SCOPE, true),
+    SHARED_ATTRIBUTE(AttributeScope.SHARED_SCOPE.name(), true),
+    SERVER_ATTRIBUTE(AttributeScope.SERVER_SCOPE.name(), true),
     TIMESERIES(true),
     ACCESS_TOKEN,
     X509,
@@ -48,7 +36,10 @@ public enum BulkImportColumnType {
     SNMP_VERSION,
     SNMP_COMMUNITY_STRING,
     IS_GATEWAY,
+    OVERWRITE_ACTIVITY_TIME,
     DESCRIPTION,
+    EDGE_LICENSE_KEY,
+    CLOUD_ENDPOINT,
     ROUTING_KEY,
     SECRET;
 

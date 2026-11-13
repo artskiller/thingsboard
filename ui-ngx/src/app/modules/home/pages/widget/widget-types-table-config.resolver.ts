@@ -1,25 +1,13 @@
-///
-/// Copyright © 2016-2023 The Thingsboard Authors
-///
-/// Licensed under the Apache License, Version 2.0 (the "License");
-/// you may not use this file except in compliance with the License.
-/// You may obtain a copy of the License at
-///
-///     http://www.apache.org/licenses/LICENSE-2.0
-///
-/// Unless required by applicable law or agreed to in writing, software
-/// distributed under the License is distributed on an "AS IS" BASIS,
-/// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-/// See the License for the specific language governing permissions and
-/// limitations under the License.
-///
-
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
+// SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
 import { Injectable } from '@angular/core';
 
-import { Resolve, Router } from '@angular/router';
+import { Router } from '@angular/router';
 import {
   checkBoxCell,
   DateEntityTableColumn,
+  EntityChipsEntityTableColumn,
   EntityTableColumn,
   EntityTableConfig
 } from '@home/models/entity/entities-table-config.models';
@@ -31,25 +19,28 @@ import { WidgetService } from '@app/core/http/widget.service';
 import { NULL_UUID } from '@shared/models/id/has-uuid';
 import { Store } from '@ngrx/store';
 import { AppState } from '@core/core.state';
-import { getCurrentAuthState, getCurrentAuthUser } from '@app/core/auth/auth.selectors';
+import { getCurrentAuthUser } from '@app/core/auth/auth.selectors';
 import { Authority } from '@shared/models/authority.enum';
-import { DialogService } from '@core/services/dialog.service';
-import { ImportExportService } from '@home/components/import-export/import-export.service';
+import { ImportExportService } from '@shared/import-export/import-export.service';
 import { Direction } from '@shared/models/page/sort-order';
 import {
   BaseWidgetType,
+  widgetType as WidgetDataType,
   WidgetTypeDetails,
   WidgetTypeInfo,
-  widgetType as WidgetDataType,
   widgetTypesData
 } from '@shared/models/widget.models';
 import { WidgetTypeComponent } from '@home/pages/widget/widget-type.component';
 import { WidgetTypeTabsComponent } from '@home/pages/widget/widget-type-tabs.component';
 import { SelectWidgetTypeDialogComponent } from '@home/pages/widget/select-widget-type-dialog.component';
 import { MatDialog } from '@angular/material/dialog';
+import { Operation, Resource } from '@shared/models/security.models';
+import { UserPermissionsService } from '@core/http/user-permissions.service';
+import { ItemType } from '@shared/models/iot-hub/iot-hub-item.models';
+import { IotHubActionsService } from '@home/components/iot-hub/iot-hub-actions.service';
 
 @Injectable()
-export class WidgetTypesTableConfigResolver implements Resolve<EntityTableConfig<WidgetTypeInfo | WidgetTypeDetails>> {
+export class WidgetTypesTableConfigResolver  {
 
   private readonly config: EntityTableConfig<WidgetTypeInfo | WidgetTypeDetails> =
     new EntityTableConfig<WidgetTypeInfo | WidgetTypeDetails>();
@@ -57,10 +48,12 @@ export class WidgetTypesTableConfigResolver implements Resolve<EntityTableConfig
   constructor(private store: Store<AppState>,
               private dialog: MatDialog,
               private widgetsService: WidgetService,
+              private userPermissionsService: UserPermissionsService,
               private translate: TranslateService,
               private importExport: ImportExportService,
               private datePipe: DatePipe,
-              private router: Router) {
+              private router: Router,
+              private iotHubActions: IotHubActionsService) {
 
     this.config.entityType = EntityType.WIDGETS_BUNDLE;
     this.config.entityComponent = WidgetTypeComponent;
@@ -76,7 +69,9 @@ export class WidgetTypesTableConfigResolver implements Resolve<EntityTableConfig
 
     this.config.columns.push(
       new DateEntityTableColumn<WidgetTypeInfo>('createdTime', 'common.created-time', this.datePipe, '150px'),
-      new EntityTableColumn<WidgetTypeInfo>('name', 'widget.title', '100%'),
+      new EntityTableColumn<WidgetTypeInfo>('name', 'widget.title', '60%'),
+      new EntityChipsEntityTableColumn<WidgetTypeInfo>( 'bundles', 'entity.type-widgets-bundles', '40%',
+          () => '/resources/widgets-library/widgets-bundles'),
       new EntityTableColumn<WidgetTypeInfo>('widgetType', 'widget.type', '150px', entity =>
         entity?.widgetType ? this.translate.instant(widgetTypesData.get(entity.widgetType).name) : '', undefined, false),
       new EntityTableColumn<WidgetTypeInfo>('tenantId', 'widget.system', '60px',
@@ -85,30 +80,15 @@ export class WidgetTypesTableConfigResolver implements Resolve<EntityTableConfig
         entity => checkBoxCell(entity.deprecated))
     );
 
-    this.config.addActionDescriptors.push(
-      {
-        name: this.translate.instant('widget-type.create-new-widget-type'),
-        icon: 'insert_drive_file',
-        isEnabled: () => true,
-        onAction: ($event) => this.addWidgetType($event)
-      },
-      {
-        name: this.translate.instant('widget-type.import'),
-        icon: 'file_upload',
-        isEnabled: () => true,
-        onAction: ($event) => this.importWidgetType($event)
-      }
-    );
-
     this.config.cellActionDescriptors.push(
       {
-        name: this.translate.instant('widget-type.export'),
+        name: this.translate.instant('widget.export'),
         icon: 'file_download',
         isEnabled: () => true,
         onAction: ($event, entity) => this.exportWidgetType($event, entity)
       },
       {
-        name: this.translate.instant('widget.widget-type-details'),
+        name: this.translate.instant('widget.widget-details'),
         icon: 'edit',
         isEnabled: () => true,
         onAction: ($event, entity) => this.config.toggleEntityDetails($event, entity)
@@ -117,24 +97,24 @@ export class WidgetTypesTableConfigResolver implements Resolve<EntityTableConfig
 
     this.config.groupActionDescriptors.push(
       {
-        name: this.translate.instant('widget-type.export-widget-types'),
+        name: this.translate.instant('widget.export-widgets'),
         icon: 'file_download',
         isEnabled: true,
         onAction: ($event, entities) => this.exportWidgetTypes($event, entities)
       }
     );
 
-    this.config.deleteEntityTitle = widgetType => this.translate.instant('widget.delete-widget-type-title',
-      { widgetTypeName: widgetType.name });
-    this.config.deleteEntityContent = () => this.translate.instant('widget.delete-widget-type-text');
-    this.config.deleteEntitiesTitle = count => this.translate.instant('widget.delete-widget-types-title', {count});
-    this.config.deleteEntitiesContent = () => this.translate.instant('widget.delete-widget-types-text');
+    this.config.deleteEntityTitle = widgetType => this.translate.instant('widget.delete-widget-title',
+      { widgetName: widgetType.name });
+    this.config.deleteEntityContent = () => this.translate.instant('widget.delete-widget-text');
+    this.config.deleteEntitiesTitle = count => this.translate.instant('widget.delete-widgets-title', {count});
+    this.config.deleteEntitiesContent = () => this.translate.instant('widget.delete-widgets-text');
 
 
     this.config.loadEntity = id => this.widgetsService.getWidgetTypeById(id.id);
     this.config.saveEntity = widgetType => this.widgetsService.saveWidgetType(widgetType as WidgetTypeDetails);
     this.config.deleteEntity = id => this.widgetsService.deleteWidgetType(id.id);
-    this.config.onEntityAction = action => this.onWidgetTypeAction(action);
+    this.config.onEntityAction = action => this.onWidgetTypeAction(action, this.config);
 
     this.config.handleRowClick = ($event, widgetType) => {
       if (this.config.isDetailsOpen()) {
@@ -147,10 +127,38 @@ export class WidgetTypesTableConfigResolver implements Resolve<EntityTableConfig
   }
 
   resolve(): EntityTableConfig<WidgetTypeInfo | WidgetTypeDetails> {
-    this.config.tableTitle = this.translate.instant('widget.widget-types');
+    this.config.tableTitle = this.translate.instant('widget.widgets');
     const authUser = getCurrentAuthUser(this.store);
-    this.config.deleteEnabled = (widgetType) => this.isWidgetTypeEditable(widgetType, authUser.authority);
-    this.config.entitySelectionEnabled = (widgetType) => this.isWidgetTypeEditable(widgetType, authUser.authority);
+    this.config.addActionDescriptors = [
+      {
+        name: this.translate.instant('dashboard.create-new-widget'),
+        icon: 'insert_drive_file',
+        isEnabled: () => true,
+        onAction: ($event) => this.addWidgetType($event)
+      },
+      {
+        name: this.translate.instant('widget.import'),
+        icon: 'file_upload',
+        isEnabled: () => true,
+        onAction: ($event) => this.importWidgetType($event)
+      }
+    ];
+    if (authUser.authority === Authority.TENANT_ADMIN && this.userPermissionsService.hasGenericPermission(Resource.ALL, Operation.ALL))  {
+      this.config.addActionDescriptors.push(
+        {
+          name: this.translate.instant('iot-hub.add-from-iot-hub'),
+          icon: 'hub',
+          isEnabled: () => true,
+          onAction: (_$event) => this.addWidgetFromIotHub()
+        }
+      );
+    }
+    this.config.deleteEnabled = (widgetType) =>
+      this.isWidgetTypeEditable(widgetType, authUser.authority) &&
+      this.userPermissionsService.hasGenericPermission(Resource.WIDGET_TYPE, Operation.DELETE);
+    this.config.entitySelectionEnabled = (widgetType) =>
+      this.isWidgetTypeEditable(widgetType, authUser.authority) &&
+      this.userPermissionsService.hasGenericPermission(Resource.WIDGET_TYPE, Operation.DELETE);
     this.config.detailsReadonly = (widgetType) => !this.isWidgetTypeEditable(widgetType, authUser.authority);
     this.config.entitiesFetchFunction = pageLink => this.widgetsService.getWidgetTypes(pageLink);
     return this.config;
@@ -181,6 +189,14 @@ export class WidgetTypesTableConfigResolver implements Resolve<EntityTableConfig
     );
   }
 
+  addWidgetFromIotHub() {
+    this.iotHubActions.addItem(ItemType.WIDGET).subscribe(result => {
+      if (result?.descriptor) {
+        this.config.updateData();
+      }
+    });
+  }
+
   importWidgetType($event: Event) {
     this.importExport.importWidgetType().subscribe(
       (widgetType) => {
@@ -196,6 +212,14 @@ export class WidgetTypesTableConfigResolver implements Resolve<EntityTableConfig
       $event.stopPropagation();
     }
     this.router.navigateByUrl(`resources/widgets-library/widget-types/${widgetType.id.id}`);
+  }
+
+  private openWidgetTypeDetails($event: Event, widgetType: BaseWidgetType, config: EntityTableConfig<BaseWidgetType>) {
+    if ($event) {
+      $event.stopPropagation();
+    }
+    const url = this.router.createUrlTree(['details', widgetType.id.id], {relativeTo: config.getActivatedRoute()});
+    this.router.navigateByUrl(url);
   }
 
   exportWidgetType($event: Event, widgetType: BaseWidgetType) {
@@ -216,10 +240,13 @@ export class WidgetTypesTableConfigResolver implements Resolve<EntityTableConfig
     );
   }
 
-  onWidgetTypeAction(action: EntityAction<BaseWidgetType>): boolean {
+  onWidgetTypeAction(action: EntityAction<BaseWidgetType>, config: EntityTableConfig<BaseWidgetType>): boolean {
     switch (action.action) {
       case 'edit':
         this.openWidgetEditor(action.event, action.entity);
+        return true;
+      case 'openDetails':
+        this.openWidgetTypeDetails(action.event, action.entity, config);
         return true;
       case 'export':
         this.exportWidgetType(action.event, action.entity);

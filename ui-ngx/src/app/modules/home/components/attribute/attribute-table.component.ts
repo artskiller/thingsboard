@@ -1,24 +1,12 @@
-///
-/// Copyright © 2016-2023 The Thingsboard Authors
-///
-/// Licensed under the Apache License, Version 2.0 (the "License");
-/// you may not use this file except in compliance with the License.
-/// You may obtain a copy of the License at
-///
-///     http://www.apache.org/licenses/LICENSE-2.0
-///
-/// Unless required by applicable law or agreed to in writing, software
-/// distributed under the License is distributed on an "AS IS" BASIS,
-/// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-/// See the License for the specific language governing permissions and
-/// limitations under the License.
-///
-
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
+// SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
 import {
   AfterViewInit,
   ChangeDetectionStrategy,
   ChangeDetectorRef,
   Component,
+  DestroyRef,
   ElementRef,
   Injector,
   Input,
@@ -39,8 +27,8 @@ import { TranslateService } from '@ngx-translate/core';
 import { MatDialog } from '@angular/material/dialog';
 import { DialogService } from '@core/services/dialog.service';
 import { Direction, SortOrder } from '@shared/models/page/sort-order';
-import { merge, Subject } from 'rxjs';
-import { debounceTime, distinctUntilChanged, takeUntil } from 'rxjs/operators';
+import { forkJoin, merge, Observable, Subject } from 'rxjs';
+import { debounceTime, distinctUntilChanged, take, takeUntil } from 'rxjs/operators';
 import { EntityId } from '@shared/models/id/entity-id';
 import {
   AttributeData,
@@ -56,6 +44,8 @@ import {
 import { AttributeDatasource } from '@home/models/datasource/attribute-datasource';
 import { AttributeService } from '@app/core/http/attribute.service';
 import { EntityType } from '@shared/models/entity-type.models';
+import { Authority } from '@shared/models/authority.enum';
+import { getCurrentAuthUser } from '@core/auth/auth.selectors';
 import { coerceBooleanProperty } from '@angular/cdk/coercion';
 import {
   AddAttributeDialogComponent,
@@ -76,7 +66,6 @@ import { AliasController } from '@core/api/alias-controller';
 import { EntityAlias, EntityAliases } from '@shared/models/alias.models';
 import { UtilsService } from '@core/services/utils.service';
 import { DashboardUtilsService } from '@core/services/dashboard-utils.service';
-import { NULL_UUID } from '@shared/models/id/has-uuid';
 import { WidgetService } from '@core/http/widget.service';
 import { toWidgetInfo } from '../../models/widget-component.models';
 import { EntityService } from '@core/http/entity.service';
@@ -84,23 +73,24 @@ import {
   AddWidgetToDashboardDialogComponent,
   AddWidgetToDashboardDialogData
 } from '@home/components/attribute/add-widget-to-dashboard-dialog.component';
-import { deepClone, isUndefinedOrNull } from '@core/utils';
+import { deepClone } from '@core/utils';
+import { UserPermissionsService } from '@core/http/user-permissions.service';
+import { Operation, Resource } from '@shared/models/security.models';
 import { Filters } from '@shared/models/query/query.models';
 import { hidePageSizePixelValue } from '@shared/models/constants';
-import { ResizeObserver } from '@juggle/resize-observer';
-import {
-  DELETE_TIMESERIES_PANEL_DATA,
-  DeleteTimeseriesPanelComponent,
-  DeleteTimeseriesPanelData
-} from '@home/components/attribute/delete-timeseries-panel.component';
+import { DeleteTimeseriesPanelComponent } from '@home/components/attribute/delete-timeseries-panel.component';
 import { FormBuilder } from '@angular/forms';
-
+import { coerceBoolean } from '@shared/decorators/coercion';
+import { AggregationType, defaultTimewindow } from '@shared/models/time/time.models';
+import { TimeService } from '@core/services/time.service';
+import { AiDashboardGenerationService } from '@home/components/ai/ai-dashboard-generation.service';
 
 @Component({
-  selector: 'tb-attribute-table',
-  templateUrl: './attribute-table.component.html',
-  styleUrls: ['./attribute-table.component.scss'],
-  changeDetection: ChangeDetectionStrategy.OnPush
+    selector: 'tb-attribute-table',
+    templateUrl: './attribute-table.component.html',
+    styleUrls: ['./attribute-table.component.scss'],
+    changeDetection: ChangeDetectionStrategy.OnPush,
+    standalone: false
 })
 export class AttributeTableComponent extends PageComponent implements AfterViewInit, OnInit, OnDestroy {
 
@@ -116,7 +106,7 @@ export class AttributeTableComponent extends PageComponent implements AfterViewI
   attributeScope: TelemetryType;
   toTelemetryTypeFunc = toTelemetryType;
 
-  displayedColumns = ['select', 'lastUpdateTs', 'key', 'value'];
+  displayedColumns = ['lastUpdateTs', 'key', 'value'];
   pageLink: PageLink;
   textSearchMode = false;
   dataSource: AttributeDatasource;
@@ -146,6 +136,10 @@ export class AttributeTableComponent extends PageComponent implements AfterViewI
   get disableAttributeScopeSelection(): boolean {
     return this.disableAttributeScopeSelectionValue;
   }
+
+  @Input()
+  @coerceBoolean()
+  disableAddTelemetry: boolean;
 
   @Input()
   set disableAttributeScopeSelection(value: boolean) {
@@ -182,6 +176,16 @@ export class AttributeTableComponent extends PageComponent implements AfterViewI
   @Input()
   entityName: string;
 
+  private readonlyValue: boolean;
+  get readonly(): boolean {
+    return this.readonlyValue;
+  }
+
+  @Input()
+  set readonly(value: boolean) {
+    this.readonlyValue = coerceBooleanProperty(value);
+  }
+
   @ViewChild('searchInput') searchInputField: ElementRef;
 
   @ViewChild(MatPaginator) paginator: MatPaginator;
@@ -189,7 +193,10 @@ export class AttributeTableComponent extends PageComponent implements AfterViewI
 
   textSearch = this.fb.control('', {nonNullable: true});
 
+  isSysAdmin = false;
+
   private destroy$ = new Subject<void>();
+  selectAllModel: boolean = false;
 
   constructor(protected store: Store<AppState>,
               private attributeService: AttributeService,
@@ -203,11 +210,16 @@ export class AttributeTableComponent extends PageComponent implements AfterViewI
               private utils: UtilsService,
               private dashboardUtils: DashboardUtilsService,
               private widgetService: WidgetService,
+              private userPermissionsService: UserPermissionsService,
               private zone: NgZone,
               private cd: ChangeDetectorRef,
               private elementRef: ElementRef,
-              private fb: FormBuilder) {
+              private fb: FormBuilder,
+              private timeService: TimeService,
+              private destroyRef: DestroyRef,
+              private aiDashboardGenerationService: AiDashboardGenerationService) {
     super(store);
+    this.isSysAdmin = getCurrentAuthUser(this.store).authority === Authority.SYS_ADMIN;
     this.dirtyValue = !this.activeValue;
     const sortOrder: SortOrder = { property: 'key', direction: Direction.ASC };
     this.pageLink = new PageLink(10, 0, null, sortOrder);
@@ -215,14 +227,29 @@ export class AttributeTableComponent extends PageComponent implements AfterViewI
   }
 
   ngOnInit() {
+    if (!this.readonly ||
+      this.userPermissionsService.hasResourcesGenericPermission([Resource.WIDGETS_BUNDLE, Resource.WIDGET_TYPE],
+        Operation.READ)) {
+      this.displayedColumns.unshift('select');
+    }
     this.widgetResize$ = new ResizeObserver(() => {
-      const showHidePageSize = this.elementRef.nativeElement.offsetWidth < hidePageSizePixelValue;
-      if (showHidePageSize !== this.hidePageSize) {
-        this.hidePageSize = showHidePageSize;
-        this.cd.markForCheck();
-      }
+      this.zone.run(() => {
+        const showHidePageSize = this.elementRef.nativeElement.offsetWidth < hidePageSizePixelValue;
+        if (showHidePageSize !== this.hidePageSize) {
+          this.hidePageSize = showHidePageSize;
+          this.cd.markForCheck();
+        }
+      });
     });
     this.widgetResize$.observe(this.elementRef.nativeElement);
+
+    this.dataSource.selection.changed.pipe(
+      takeUntil(this.destroy$)
+    ).subscribe(() => {
+      this.dataSource.isAllSelected().pipe(take(1)).subscribe(allSelected => {
+        this.selectAllModel = allSelected;
+      });
+    });
   }
 
   ngOnDestroy() {
@@ -237,6 +264,7 @@ export class AttributeTableComponent extends PageComponent implements AfterViewI
     this.attributeScope = attributeScope;
     this.mode = 'default';
     this.paginator.pageIndex = 0;
+    this.selectAllModel = false;
     this.updateData(true);
   }
 
@@ -318,13 +346,19 @@ export class AttributeTableComponent extends PageComponent implements AfterViewI
     if ($event) {
       $event.stopPropagation();
     }
+    const data: AddAttributeDialogData = {
+      entityId: this.entityIdValue,
+      attributeScope: this.attributeScope,
+    };
+
+    if(this.attributeScope === LatestTelemetry.LATEST_TELEMETRY) {
+      data.datasource = this.dataSource;
+    }
+
     this.dialog.open<AddAttributeDialogComponent, AddAttributeDialogData, boolean>(AddAttributeDialogComponent, {
       disableClose: true,
       panelClass: ['tb-dialog', 'tb-fullscreen-dialog'],
-      data: {
-        entityId: this.entityIdValue,
-        attributeScope: this.attributeScope
-      }
+      data
     }).afterClosed().subscribe(
       (res) => {
         if (res) {
@@ -338,10 +372,10 @@ export class AttributeTableComponent extends PageComponent implements AfterViewI
     if ($event) {
       $event.stopPropagation();
     }
-    if (this.isClientSideTelemetryTypeMap.get(this.attributeScope)) {
+    if (this.isClientSideTelemetryTypeMap.get(this.attributeScope) || this.readonly) {
       return;
     }
-    const target = $event.target || $event.srcElement || $event.currentTarget;
+    const target = $event.target || $event.currentTarget;
     const config = new OverlayConfig();
     config.backdropClass = 'cdk-overlay-transparent-backdrop';
     config.hasBackdrop = true;
@@ -392,8 +426,7 @@ export class AttributeTableComponent extends PageComponent implements AfterViewI
     if ($event) {
       $event.stopPropagation();
     }
-    const isMultipleDeletion = isUndefinedOrNull(telemetry) && this.dataSource.selection.selected.length > 1;
-    const target = $event.target || $event.srcElement || $event.currentTarget;
+    const target = $event.target || $event.currentTarget;
     const config = new OverlayConfig({
       panelClass: 'tb-filter-panel',
       backdropClass: 'cdk-overlay-transparent-backdrop',
@@ -416,12 +449,6 @@ export class AttributeTableComponent extends PageComponent implements AfterViewI
 
     const providers: StaticProvider[] = [
       {
-        provide: DELETE_TIMESERIES_PANEL_DATA,
-        useValue: {
-          isMultipleDeletion
-        } as DeleteTimeseriesPanelData
-      },
-      {
         provide: OverlayRef,
         useValue: overlayRef
       }
@@ -433,6 +460,7 @@ export class AttributeTableComponent extends PageComponent implements AfterViewI
       if (componentRef.instance.result !== null) {
         const result = componentRef.instance.result;
         const deleteTimeseries = telemetry ? [telemetry]: this.dataSource.selection.selected;
+        const tasks: Observable<any>[] = [];
         let deleteAllDataForKeys = false;
         let rewriteLatestIfDeleted = false;
         let startTs = null;
@@ -448,8 +476,12 @@ export class AttributeTableComponent extends PageComponent implements AfterViewI
             break;
           case TimeseriesDeleteStrategy.DELETE_LATEST_VALUE:
             rewriteLatestIfDeleted = result.rewriteLatest;
-            startTs = deleteTimeseries[0].lastUpdateTs;
-            endTs = startTs + 1;
+            for (const ts of deleteTimeseries) {
+              startTs = ts.lastUpdateTs;
+              endTs = startTs + 1;
+              tasks.push(this.attributeService.deleteEntityTimeseries(this.entityIdValue, [ts],
+                deleteAllDataForKeys, startTs, endTs, rewriteLatestIfDeleted, deleteLatest));
+            }
             break;
           case TimeseriesDeleteStrategy.DELETE_ALL_DATA_FOR_TIME_PERIOD:
             startTs = result.startDateTime.getTime();
@@ -457,9 +489,13 @@ export class AttributeTableComponent extends PageComponent implements AfterViewI
             rewriteLatestIfDeleted = result.rewriteLatest;
             break;
         }
-        this.attributeService.deleteEntityTimeseries(this.entityIdValue, deleteTimeseries, deleteAllDataForKeys,
-                                                      startTs, endTs, rewriteLatestIfDeleted, deleteLatest)
-          .subscribe(() => this.reloadAttributes());
+        if (tasks.length) {
+          forkJoin(tasks).subscribe(() => this.reloadAttributes());
+        } else {
+          this.attributeService.deleteEntityTimeseries(this.entityIdValue, deleteTimeseries, deleteAllDataForKeys,
+                                                        startTs, endTs, rewriteLatestIfDeleted, deleteLatest)
+            .subscribe(() => this.reloadAttributes());
+        }
       }
     });
   }
@@ -497,19 +533,25 @@ export class AttributeTableComponent extends PageComponent implements AfterViewI
   }
 
   enterWidgetMode() {
+    this.dashboardUtils.createSingleEntityFilter(this.entityIdValue).subscribe((filter) => {
+      const entityAlias: EntityAlias = {
+        id: this.utils.guid(),
+        alias: this.entityName,
+        filter
+      };
+      this.configureWidgetMode(entityAlias);
+    });
+  }
+
+  private configureWidgetMode(entityAlias: EntityAlias) {
     this.mode = 'widget';
     this.widgetsList = [];
     this.widgetsListCache = [];
     this.widgetsLoaded = false;
     this.widgetBundleSet = false;
     this.widgetsCarouselIndex = 0;
-    this.selectedWidgetsBundleAlias = 'cards';
+    this.selectedWidgetsBundleAlias = 'tables';
 
-    const entityAlias: EntityAlias = {
-      id: this.utils.guid(),
-      alias: this.entityName,
-      filter: this.dashboardUtils.createSingleEntityFilter(this.entityIdValue)
-    };
     const entitiAliases: EntityAliases = {};
     entitiAliases[entityAlias.id] = entityAlias;
 
@@ -542,7 +584,6 @@ export class AttributeTableComponent extends PageComponent implements AfterViewI
         type: dataKeyType,
         color: this.utils.getMaterialColor(i),
         settings: {},
-        _hash: Math.random()
       };
       this.widgetDatasource.dataKeys.push(dataKey);
     }
@@ -569,7 +610,7 @@ export class AttributeTableComponent extends PageComponent implements AfterViewI
         this.widgetsLoaded = false;
         this.widgetService.getBundleWidgetTypes(widgetsBundle.id.id).subscribe(
           (widgetTypes) => {
-            widgetTypes = widgetTypes.sort((a, b) => {
+            widgetTypes = widgetTypes.filter(widget => !widget.deprecated).sort((a, b) => {
               let result = widgetType[b.descriptor.type].localeCompare(widgetType[a.descriptor.type]);
               if (result === 0) {
                 result = b.createdTime - a.createdTime;
@@ -593,6 +634,11 @@ export class AttributeTableComponent extends PageComponent implements AfterViewI
                 };
                 widget.config.title = widgetInfo.widgetName;
                 widget.config.datasources = [this.widgetDatasource];
+                if (widget.type === widgetType.timeseries && widget.config.useDashboardTimewindow) {
+                  widget.config.useDashboardTimewindow = false;
+                  widget.config.timewindow = defaultTimewindow(this.timeService);
+                  widget.config.timewindow.aggregation.type = AggregationType.NONE;
+                }
                 if ((this.attributeScope === LatestTelemetry.LATEST_TELEMETRY && widgetInfo.type !== widgetType.rpc) ||
                       widgetInfo.type === widgetType.latest) {
                   const length = this.widgetsListCache.push([widget]);
@@ -629,4 +675,13 @@ export class AttributeTableComponent extends PageComponent implements AfterViewI
     this.mode = 'default';
   }
 
+  generateDashboard($event: Event) {
+    $event.stopPropagation();
+    const selectedTimeseries = this.dataSource.selection.selected.map(telemetry => telemetry.key);
+    this.aiDashboardGenerationService.generate(this.entityIdValue.id, this.destroyRef, selectedTimeseries);
+  }
+
+  isAllowedDashboardGenerate(): boolean {
+    return this.aiDashboardGenerationService.isAllowedDashboardGenerate();
+  }
 }

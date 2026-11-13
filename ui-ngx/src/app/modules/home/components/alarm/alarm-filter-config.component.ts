@@ -1,21 +1,9 @@
-///
-/// Copyright © 2016-2023 The Thingsboard Authors
-///
-/// Licensed under the Apache License, Version 2.0 (the "License");
-/// you may not use this file except in compliance with the License.
-/// You may obtain a copy of the License at
-///
-///     http://www.apache.org/licenses/LICENSE-2.0
-///
-/// Unless required by applicable law or agreed to in writing, software
-/// distributed under the License is distributed on an "AS IS" BASIS,
-/// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-/// See the License for the specific language governing permissions and
-/// limitations under the License.
-///
-
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
+// SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
 import {
   Component,
+  DestroyRef,
   ElementRef,
   forwardRef,
   Inject,
@@ -45,6 +33,8 @@ import { deepClone } from '@core/utils';
 import { EntityType } from '@shared/models/entity-type.models';
 import { fromEvent, Subscription } from 'rxjs';
 import { POSITION_MAP } from '@shared/models/overlay.models';
+import { UtilsService } from '@core/services/utils.service';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 export const ALARM_FILTER_CONFIG_DATA = new InjectionToken<any>('AlarmFilterConfigData');
 
@@ -57,16 +47,17 @@ export interface AlarmFilterConfigData {
 
 // @dynamic
 @Component({
-  selector: 'tb-alarm-filter-config',
-  templateUrl: './alarm-filter-config.component.html',
-  styleUrls: ['./alarm-filter-config.component.scss'],
-  providers: [
-    {
-      provide: NG_VALUE_ACCESSOR,
-      useExisting: forwardRef(() => AlarmFilterConfigComponent),
-      multi: true
-    }
-  ]
+    selector: 'tb-alarm-filter-config',
+    templateUrl: './alarm-filter-config.component.html',
+    styleUrls: ['./alarm-filter-config.component.scss'],
+    providers: [
+        {
+            provide: NG_VALUE_ACCESSOR,
+            useExisting: forwardRef(() => AlarmFilterConfigComponent),
+            multi: true
+        }
+    ],
+    standalone: false
 })
 export class AlarmFilterConfigComponent implements OnInit, OnDestroy, ControlValueAccessor {
 
@@ -82,6 +73,10 @@ export class AlarmFilterConfigComponent implements OnInit, OnDestroy, ControlVal
   @coerceBoolean()
   @Input()
   userMode = false;
+
+  @coerceBoolean()
+  @Input()
+  disableAssignedToCurrentUserOption = false;
 
   @coerceBoolean()
   @Input()
@@ -104,7 +99,7 @@ export class AlarmFilterConfigComponent implements OnInit, OnDestroy, ControlVal
 
   alarmSeverityTranslationMap = alarmSeverityTranslations;
 
-  buttonDisplayValue = this.translate.instant('alarm.alarm-filter');
+  buttonDisplayValue = this.translate.instant('alarm.alarm-filter-title');
 
   alarmFilterConfigForm: UntypedFormGroup;
 
@@ -127,7 +122,9 @@ export class AlarmFilterConfigComponent implements OnInit, OnDestroy, ControlVal
               private translate: TranslateService,
               private overlay: Overlay,
               private nativeElement: ElementRef,
-              private viewContainerRef: ViewContainerRef) {
+              private viewContainerRef: ViewContainerRef,
+              private utils: UtilsService,
+              private destroyRef: DestroyRef) {
   }
 
   ngOnInit(): void {
@@ -147,7 +144,9 @@ export class AlarmFilterConfigComponent implements OnInit, OnDestroy, ControlVal
       searchPropagatedAlarms: [false, []],
       assigneeId: [AlarmAssigneeOption.noAssignee, []]
     });
-    this.alarmFilterConfigForm.valueChanges.subscribe(
+    this.alarmFilterConfigForm.valueChanges.pipe(
+      takeUntilDestroyed(this.destroyRef)
+    ).subscribe(
       () => {
         if (!this.buttonMode) {
           this.alarmConfigUpdated(this.alarmFilterConfigForm.value);
@@ -217,6 +216,7 @@ export class AlarmFilterConfigComponent implements OnInit, OnDestroy, ControlVal
 
   cancel() {
     this.updateAlarmConfigForm(this.alarmFilterConfig);
+    this.alarmFilterConfigForm.markAsPristine();
     if (this.overlayRef) {
       this.overlayRef.dispose();
     } else {
@@ -298,7 +298,7 @@ export class AlarmFilterConfigComponent implements OnInit, OnDestroy, ControlVal
           this.translate.instant(alarmSeverityTranslations.get(s))).join(', '));
       }
       if (this.alarmFilterConfig?.typeList?.length) {
-        filterTextParts.push(this.alarmFilterConfig.typeList.join(', '));
+        filterTextParts.push(this.alarmFilterConfig.typeList.map((type) => this.customTranslate(type)).join(', '));
       }
       if (this.alarmFilterConfig?.assignedToCurrentUser) {
         filterTextParts.push(this.translate.instant('alarm.assigned-to-me'));
@@ -311,6 +311,10 @@ export class AlarmFilterConfigComponent implements OnInit, OnDestroy, ControlVal
         this.buttonDisplayValue = this.translate.instant('alarm.filter-title') + `: ${filterTextParts.join(', ')}`;
       }
     }
+  }
+
+  private customTranslate(entity: string) {
+    return this.utils.customTranslation(entity, entity);
   }
 
 }

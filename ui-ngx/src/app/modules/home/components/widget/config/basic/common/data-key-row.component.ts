@@ -1,31 +1,17 @@
-///
-/// Copyright © 2016-2023 The Thingsboard Authors
-///
-/// Licensed under the Apache License, Version 2.0 (the "License");
-/// you may not use this file except in compliance with the License.
-/// You may obtain a copy of the License at
-///
-///     http://www.apache.org/licenses/LICENSE-2.0
-///
-/// Unless required by applicable law or agreed to in writing, software
-/// distributed under the License is distributed on an "AS IS" BASIS,
-/// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-/// See the License for the specific language governing permissions and
-/// limitations under the License.
-///
-
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
+// SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
 import {
   ChangeDetectorRef,
   Component,
-  ElementRef,
+  DestroyRef,
   EventEmitter,
   forwardRef,
   Input,
   OnChanges,
-  OnInit,
+  OnInit, Optional,
   Output,
   SimpleChanges,
-  ViewChild,
   ViewEncapsulation
 } from '@angular/core';
 import {
@@ -35,40 +21,44 @@ import {
   UntypedFormBuilder,
   UntypedFormControl,
   UntypedFormGroup,
-  ValidationErrors
+  ValidationErrors,
+  Validators
 } from '@angular/forms';
 import { MatDialog } from '@angular/material/dialog';
 import { WidgetConfigComponent } from '@home/components/widget/widget-config.component';
-import {
-  DataKey,
-  DataKeyConfigMode,
-  DatasourceType,
-  JsonSettingsSchema,
-  Widget,
-  widgetType
-} from '@shared/models/widget.models';
-import { DataKeysPanelComponent } from '@home/components/widget/config/basic/common/data-keys-panel.component';
+import { DataKey, DataKeyConfigMode, DatasourceType, Widget, widgetType } from '@shared/models/widget.models';
 import { DataKeyType } from '@shared/models/telemetry/telemetry.models';
-import { AggregationType } from '@shared/models/time/time.models';
-import { COMMA, ENTER, SEMICOLON } from '@angular/cdk/keycodes';
-import { MatChipGrid, MatChipInputEvent } from '@angular/material/chips';
-import { DataKeysCallbacks } from '@home/components/widget/config/data-keys.component.models';
-import { MatAutocomplete, MatAutocompleteTrigger } from '@angular/material/autocomplete';
-import { Observable, of } from 'rxjs';
-import { filter, map, mergeMap, publishReplay, refCount, share, tap } from 'rxjs/operators';
-import { TranslateService } from '@ngx-translate/core';
-import { TruncatePipe } from '@shared/pipe/truncate.pipe';
+import {
+  DataKeySettingsFormFunction,
+  DataKeySettingsFunction
+} from '@home/components/widget/lib/settings/common/key/data-keys.component.models';
+import { merge } from 'rxjs';
 import {
   DataKeyConfigDialogComponent,
   DataKeyConfigDialogData
-} from '@home/components/widget/config/data-key-config-dialog.component';
+} from '@home/components/widget/lib/settings/common/key/data-key-config-dialog.component';
 import { deepClone } from '@core/utils';
 import { Dashboard } from '@shared/models/dashboard.models';
 import { IAliasController } from '@core/api/widget-api.models';
+import { coerceBoolean } from '@shared/decorators/coercion';
+import {
+  TimeSeriesChartKeySettings,
+  TimeSeriesChartSeriesType,
+  timeSeriesChartSeriesTypeIcons,
+  timeSeriesChartSeriesTypes,
+  timeSeriesChartSeriesTypeTranslations,
+  TimeSeriesChartYAxisId
+} from '@home/components/widget/lib/chart/time-series-chart.models';
+import { WidgetConfigCallbacks } from '@home/components/widget/config/widget-config.component.models';
+import { FormProperty } from '@shared/models/dynamic-form.models';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { DataKeysPanelComponent } from '@home/components/widget/config/basic/common/data-keys-panel.component';
+
+export const dataKeyValid = (key: DataKey): boolean => !!key && !!key.type && !!key.name;
 
 export const dataKeyRowValidator = (control: AbstractControl): ValidationErrors | null => {
   const dataKey: DataKey = control.value;
-  if (!dataKey || !dataKey.type || !dataKey.name) {
+  if (!dataKeyValid(dataKey)) {
     return {
       dataKey: true
     };
@@ -77,32 +67,31 @@ export const dataKeyRowValidator = (control: AbstractControl): ValidationErrors 
 };
 
 @Component({
-  selector: 'tb-data-key-row',
-  templateUrl: './data-key-row.component.html',
-  styleUrls: ['./data-key-row.component.scss', '../../data-keys.component.scss'],
-  providers: [
-    {
-      provide: NG_VALUE_ACCESSOR,
-      useExisting: forwardRef(() => DataKeyRowComponent),
-      multi: true
-    }
-  ],
-  encapsulation: ViewEncapsulation.None
+    selector: 'tb-data-key-row',
+    templateUrl: './data-key-row.component.html',
+    styleUrls: ['./data-key-row.component.scss', '../../../lib/settings/common/key/data-keys.component.scss'],
+    providers: [
+        {
+            provide: NG_VALUE_ACCESSOR,
+            useExisting: forwardRef(() => DataKeyRowComponent),
+            multi: true
+        }
+    ],
+    encapsulation: ViewEncapsulation.None,
+    standalone: false
 })
 export class DataKeyRowComponent implements ControlValueAccessor, OnInit, OnChanges {
 
-  dataKeyTypes = DataKeyType;
-  widgetTypes = widgetType;
-
-  separatorKeysCodes: number[] = [ENTER, COMMA, SEMICOLON];
-
-  @ViewChild('keyInput') keyInput: ElementRef<HTMLInputElement>;
-  @ViewChild('keyAutocomplete') matAutocomplete: MatAutocomplete;
-  @ViewChild(MatAutocompleteTrigger) autocomplete: MatAutocompleteTrigger;
-  @ViewChild('chipList') chipList: MatChipGrid;
+  timeSeriesChartSeriesTypes = timeSeriesChartSeriesTypes;
+  timeSeriesChartSeriesTypeTranslations = timeSeriesChartSeriesTypeTranslations;
+  timeSeriesChartSeriesTypeIcons = timeSeriesChartSeriesTypeIcons;
 
   @Input()
   disabled: boolean;
+
+  @Input()
+  @coerceBoolean()
+  required = false;
 
   @Input()
   datasourceType: DatasourceType;
@@ -113,6 +102,62 @@ export class DataKeyRowComponent implements ControlValueAccessor, OnInit, OnChan
   @Input()
   deviceId: string;
 
+  @Input()
+  @coerceBoolean()
+  reportMode = false;
+
+  @Input()
+  @coerceBoolean()
+  hasAdditionalLatestDataKeys = false;
+
+  @Input()
+  @coerceBoolean()
+  hideDataKeyLabel = false;
+
+  @Input()
+  @coerceBoolean()
+  hideDataKeyColor = false;
+
+  @Input()
+  @coerceBoolean()
+  hideDataKeyUnits = false;
+
+  @Input()
+  @coerceBoolean()
+  hideDataKeyDecimals = false;
+
+  @Input()
+  @coerceBoolean()
+  hideUnits = false;
+
+  @Input()
+  @coerceBoolean()
+  hideDecimals = false;
+
+  @Input()
+  @coerceBoolean()
+  timeSeriesChart = false;
+
+  @Input()
+  @coerceBoolean()
+  showTimeSeriesType = false;
+
+  @Input()
+  yAxisIds: TimeSeriesChartYAxisId[];
+
+  @Input()
+  @coerceBoolean()
+  singleRow = true;
+
+  @Input()
+  dataKeyType: DataKeyType;
+
+  @Input()
+  keySettingsTitle: string;
+
+  @Input()
+  removeKeyTitle: string;
+
   @Output()
   keyRemoved = new EventEmitter();
 
@@ -122,75 +167,62 @@ export class DataKeyRowComponent implements ControlValueAccessor, OnInit, OnChan
 
   modelValue: DataKey;
 
-  filteredKeys: Observable<Array<DataKey>>;
-
-  keySearchText = '';
-
-  private latestKeySearchTextResult: Array<DataKey> = null;
-  private keyFetchObservable$: Observable<Array<DataKey>> = null;
-
-  get dataKeyType(): DataKeyType {
-    return this.dataKeysPanelComponent.dataKeyType;
-  }
-
-  get alarmKeys(): Array<DataKey> {
-    return this.dataKeysPanelComponent.alarmKeys;
-  }
-
-  get functionTypeKeys(): Array<DataKey> {
-    return this.dataKeysPanelComponent.functionTypeKeys;
-  }
-
-  get hideDataKeyColor(): boolean {
-    return this.dataKeysPanelComponent.hideDataKeyColor;
-  }
-
-  get hideUnits(): boolean {
-    return this.dataKeysPanelComponent.hideUnits;
-  }
-
-  get hideDecimals(): boolean {
-    return this.dataKeysPanelComponent.hideDecimals;
-  }
+  generateDataKey = this._generateDataKey.bind(this);
 
   get widgetType(): widgetType {
-    return this.widgetConfigComponent.widgetType;
+    return this.widgetConfigComponent?.widgetType || this.dataKeysPanelComponent?.widgetType;
   }
 
-  get callbacks(): DataKeysCallbacks {
-    return this.widgetConfigComponent.widgetConfigCallbacks;
-  }
-
-  get hasAdditionalLatestDataKeys(): boolean {
-    return this.dataKeysPanelComponent.hasAdditionalLatestDataKeys;
+  get callbacks(): WidgetConfigCallbacks {
+    return this.widgetConfigComponent?.widgetConfigCallbacks || this.dataKeysPanelComponent?.callbacks;
   }
 
   get widget(): Widget {
-    return this.widgetConfigComponent.widget;
+    return this.widgetConfigComponent?.widget || this.dataKeysPanelComponent?.widget;
   }
 
   get dashboard(): Dashboard {
-    return this.widgetConfigComponent.dashboard;
+    return this.widgetConfigComponent?.dashboard;
   }
 
   get aliasController(): IAliasController {
-    return this.widgetConfigComponent.aliasController;
+    return this.widgetConfigComponent?.aliasController || this.dataKeysPanelComponent?.aliasController;
   }
 
-  get dataKeySettingsSchema(): JsonSettingsSchema {
-    return this.widgetConfigComponent.modelValue?.dataKeySettingsSchema;
+  get dataKeySettingsForm(): FormProperty[] {
+    return this.widgetConfigComponent?.modelValue?.dataKeySettingsForm || this.dataKeysPanelComponent?.dataKeySettingsForm;
+  }
+
+  get dataKeySettingsFormFunction(): DataKeySettingsFormFunction {
+    return this.dataKeysPanelComponent?.dataKeySettingsFormFunction;
+  }
+
+  get dataKeySettingsFormTrimDefaults(): boolean {
+    return this.dataKeysPanelComponent?.dataKeySettingsFormTrimDefaults;
   }
 
   get dataKeySettingsDirective(): string {
-    return this.widgetConfigComponent.modelValue?.dataKeySettingsDirective;
+    return this.widgetConfigComponent?.modelValue?.dataKeySettingsDirective || this.dataKeysPanelComponent?.dataKeySettingsDirective;
   }
 
-  get latestDataKeySettingsSchema(): JsonSettingsSchema {
-    return this.widgetConfigComponent.modelValue?.latestDataKeySettingsSchema;
+  get latestDataKeySettingsForm(): FormProperty[] {
+    return this.widgetConfigComponent?.modelValue?.latestDataKeySettingsForm  || this.dataKeysPanelComponent?.latestDataKeySettingsForm;
+  }
+
+  get latestDataKeySettingsFormFunction(): DataKeySettingsFormFunction {
+    return this.dataKeysPanelComponent?.latestDataKeySettingsFormFunction;
+  }
+
+  get latestDataKeySettingsFormTrimDefaults(): boolean {
+    return this.dataKeysPanelComponent?.latestDataKeySettingsFormTrimDefaults;
   }
 
   get latestDataKeySettingsDirective(): string {
-    return this.widgetConfigComponent.modelValue?.latestDataKeySettingsDirective;
+    return this.widgetConfigComponent?.modelValue?.latestDataKeySettingsDirective;
+  }
+
+  get dataKeySettingsFunction(): DataKeySettingsFunction {
+    return this.widgetConfigComponent?.modelValue?.dataKeySettingsFunction || this.dataKeysPanelComponent?.dataKeySettingsFunction;
   }
 
   get isEntityDatasource(): boolean {
@@ -198,38 +230,29 @@ export class DataKeyRowComponent implements ControlValueAccessor, OnInit, OnChan
   }
 
   get displayUnitsOrDigits() {
-    return this.modelValue.type && ![ DataKeyType.alarm, DataKeyType.entityField, DataKeyType.count ].includes(this.modelValue.type);
-  }
-
-  get keySettingsTitle(): string {
-    return this.dataKeysPanelComponent.keySettingsTitle;
-  }
-
-  get removeKeyTitle(): string {
-    return this.dataKeysPanelComponent.removeKeyTitle;
-  }
-
-  get dragEnabled(): boolean {
-    return this.dataKeysPanelComponent.dragEnabled;
+    return this.modelValue?.type && ![ DataKeyType.alarm, DataKeyType.entityField, DataKeyType.count ].includes(this.modelValue?.type);
   }
 
   get isLatestDataKeys(): boolean {
     return this.hasAdditionalLatestDataKeys && this.keyRowFormGroup.get('latest').value === true;
   }
 
+  get supportsUnitConversion(): boolean {
+    return this.widgetConfigComponent?.modelValue?.typeParameters?.supportsUnitConversion ?? false;
+  }
+
   private propagateChange = (_val: any) => {};
 
   constructor(private fb: UntypedFormBuilder,
               private dialog: MatDialog,
+              @Optional() private dataKeysPanelComponent: DataKeysPanelComponent,
               private cd: ChangeDetectorRef,
-              public translate: TranslateService,
-              public truncate: TruncatePipe,
-              private dataKeysPanelComponent: DataKeysPanelComponent,
-              private widgetConfigComponent: WidgetConfigComponent) {
+              @Optional() private widgetConfigComponent: WidgetConfigComponent,
+              private destroyRef: DestroyRef) {
   }
 
   ngOnInit() {
-    this.keyFormControl = this.fb.control('');
+    this.keyFormControl = this.fb.control(null, this.required ? [Validators.required] : []);
     this.keyRowFormGroup = this.fb.group({
       label: [null, []],
       color: [null, []],
@@ -238,52 +261,26 @@ export class DataKeyRowComponent implements ControlValueAccessor, OnInit, OnChan
     });
     if (this.hasAdditionalLatestDataKeys) {
       this.keyRowFormGroup.addControl('latest', this.fb.control(false));
-      this.keyRowFormGroup.valueChanges.subscribe(
-        () => this.clearKeySearchCache()
-      );
     }
-    this.keyRowFormGroup.valueChanges.subscribe(
+    if (this.timeSeriesChart) {
+      this.keyRowFormGroup.addControl('yAxis', this.fb.control(null));
+      this.keyRowFormGroup.addControl('timeSeriesType', this.fb.control(null));
+    }
+    merge(this.keyFormControl.valueChanges, this.keyRowFormGroup.valueChanges).pipe(
+      takeUntilDestroyed(this.destroyRef)
+    ).subscribe(
       () => this.updateModel()
     );
-    this.filteredKeys = this.keyFormControl.valueChanges
-      .pipe(
-        tap((value: string | DataKey) => {
-          if (value && typeof value !== 'string') {
-            this.addKeyFromChipValue(value);
-          } else if (value === null) {
-            this.clearKeyChip(this.keyInput.nativeElement.value);
-          }
-        }),
-        filter((value) => typeof value === 'string'),
-        map((value) => value ? (typeof value === 'string' ? value : value.name) : ''),
-        mergeMap(name => this.fetchKeys(name) ),
-        share()
-      );
-  }
-
-  private reset() {
-    if (this.keyInput) {
-      this.keyInput.nativeElement.value = '';
-    }
-    this.keyFormControl.patchValue('', {emitEvent: false});
-    this.latestKeySearchTextResult = null;
   }
 
   ngOnChanges(changes: SimpleChanges): void {
     for (const propName of Object.keys(changes)) {
       const change = changes[propName];
       if (!change.firstChange && change.currentValue !== change.previousValue) {
-        if (['deviceId', 'entityAliasId'].includes(propName)) {
-          this.clearKeySearchCache();
-        } else if (['datasourceType'].includes(propName)) {
-          if ([DatasourceType.device, DatasourceType.entity].includes(change.previousValue) &&
-              [DatasourceType.device, DatasourceType.entity].includes(change.currentValue)) {
-            this.clearKeySearchCache();
-          } else {
-            this.clearKeySearchCache();
-            setTimeout(() => {
-              this.reset();
-            }, 1);
+        if (this.timeSeriesChart && ['yAxisIds'].includes(propName)) {
+          if (this.modelValue?.settings?.yAxisId &&
+            !this.yAxisIds.includes(this.modelValue.settings.yAxisId)) {
+            this.keyRowFormGroup.patchValue({yAxis: 'default'}, {emitEvent: true});
           }
         }
       }
@@ -300,14 +297,16 @@ export class DataKeyRowComponent implements ControlValueAccessor, OnInit, OnChan
   setDisabledState(isDisabled: boolean): void {
     this.disabled = isDisabled;
     if (isDisabled) {
+      this.keyFormControl.disable({emitEvent: false});
       this.keyRowFormGroup.disable({emitEvent: false});
     } else {
+      this.keyFormControl.enable({emitEvent: false});
       this.keyRowFormGroup.enable({emitEvent: false});
     }
   }
 
   writeValue(value: DataKey): void {
-    this.modelValue = value || {} as DataKey;
+    this.modelValue = (value?.name && value?.type) ? value : null;
     this.keyRowFormGroup.patchValue(
       {
         label: value?.label,
@@ -321,33 +320,17 @@ export class DataKeyRowComponent implements ControlValueAccessor, OnInit, OnChan
         latest: (value as any)?.latest
       }, {emitEvent: false});
     }
-    this.cd.markForCheck();
-  }
-
-  dataKeyHasAggregation(): boolean {
-    return this.widgetConfigComponent.widgetType === widgetType.latest && this.modelValue?.type === DataKeyType.timeseries
-      && this.modelValue?.aggregationType && this.modelValue?.aggregationType !== AggregationType.NONE;
-  }
-
-  dataKeyHasPostprocessing(): boolean {
-    return !!this.modelValue?.postFuncBody;
-  }
-
-  displayKeyFn(key?: DataKey): string | undefined {
-    return key ? key.name : undefined;
-  }
-
-  createKey(name: string, dataKeyType: DataKeyType = this.dataKeyType) {
-    this.addKeyFromChipValue({name: name ? name.trim() : '', type: dataKeyType});
-  }
-
-  addKey(event: MatChipInputEvent): void {
-    const value = event.value;
-    if ((value || '').trim() && this.dataKeyType) {
-      this.addKeyFromChipValue({name: value.trim(), type: this.dataKeyType});
-    } else {
-      this.clearKeyChip();
+    if (this.timeSeriesChart) {
+      const settings = value?.settings as TimeSeriesChartKeySettings;
+      const yAxis = settings?.yAxisId || 'default';
+      const timeSeriesType = settings?.type || TimeSeriesChartSeriesType.line;
+      this.keyRowFormGroup.patchValue({
+        yAxis,
+        timeSeriesType
+      }, {emitEvent: false});
     }
+    this.keyFormControl.patchValue(deepClone(this.modelValue), {emitEvent: false});
+    this.cd.markForCheck();
   }
 
   editKey(advanced = false) {
@@ -358,7 +341,9 @@ export class DataKeyRowComponent implements ControlValueAccessor, OnInit, OnChan
         data: {
           dataKey: deepClone(this.modelValue),
           dataKeyConfigMode: advanced ? DataKeyConfigMode.advanced : DataKeyConfigMode.general,
-          dataKeySettingsSchema: this.isLatestDataKeys ? this.latestDataKeySettingsSchema : this.dataKeySettingsSchema,
+          dataKeySettingsForm: this.isLatestDataKeys ? this.latestDataKeySettingsForm : this.dataKeySettingsForm,
+          dataKeySettingsFormFunction: this.isLatestDataKeys ? this.latestDataKeySettingsFormFunction : this.dataKeySettingsFormFunction,
+          dataKeySettingsFormTrimDefaults: this.isLatestDataKeys ? this.latestDataKeySettingsFormTrimDefaults : this.dataKeySettingsFormTrimDefaults,
           dataKeySettingsDirective: this.isLatestDataKeys ? this.latestDataKeySettingsDirective : this.dataKeySettingsDirective,
           dashboard: this.dashboard,
           aliasController: this.aliasController,
@@ -367,11 +352,13 @@ export class DataKeyRowComponent implements ControlValueAccessor, OnInit, OnChan
           deviceId: this.deviceId,
           entityAliasId: this.entityAliasId,
           showPostProcessing: this.widgetType !== widgetType.alarm,
+          reportMode: this.reportMode,
           callbacks: this.callbacks,
-          hideDataKeyLabel: false,
+          hideDataKeyLabel: this.hideDataKeyLabel,
           hideDataKeyColor: this.hideDataKeyColor,
-          hideDataKeyUnits: !this.displayUnitsOrDigits,
-          hideDataKeyDecimals: !this.displayUnitsOrDigits
+          hideDataKeyUnits: this.hideDataKeyUnits || !this.displayUnitsOrDigits,
+          hideDataKeyDecimals: this.hideDataKeyDecimals || !this.displayUnitsOrDigits,
+          supportsUnitConversion: this.supportsUnitConversion
         }
       }).afterClosed().subscribe((updatedDataKey) => {
       if (updatedDataKey) {
@@ -380,107 +367,42 @@ export class DataKeyRowComponent implements ControlValueAccessor, OnInit, OnChan
         this.keyRowFormGroup.get('color').patchValue(this.modelValue.color, {emitEvent: false});
         this.keyRowFormGroup.get('units').patchValue(this.modelValue.units, {emitEvent: false});
         this.keyRowFormGroup.get('decimals').patchValue(this.modelValue.decimals, {emitEvent: false});
+        if (this.timeSeriesChart) {
+          this.keyRowFormGroup.get('yAxis').patchValue(this.modelValue.settings?.yAxisId, {emitEvent: false});
+          this.keyRowFormGroup.get('timeSeriesType').patchValue(this.modelValue.settings?.type, {emitEvent: false});
+        }
+        this.keyFormControl.patchValue(deepClone(this.modelValue), {emitEvent: false});
         this.updateModel();
         this.cd.markForCheck();
       }
     });
   }
 
-  removeKey() {
-    this.modelValue = {} as DataKey;
-    this.updateModel();
-    this.clearKeyChip();
-  }
-
-  textIsNotEmpty(text: string): boolean {
-    return text && text.length > 0;
-  }
-
-  clearKeyChip(value: string = '', focus = true) {
-    this.autocomplete.closePanel();
-    this.keyInput.nativeElement.value = value;
-    this.keyFormControl.patchValue(value, {emitEvent: focus});
-    if (focus) {
-      setTimeout(() => {
-        this.keyInput.nativeElement.blur();
-        this.keyInput.nativeElement.focus();
-      }, 0);
-    }
-  }
-
-  onKeyInputFocus() {
-    if (!this.modelValue.type) {
-      this.keyFormControl.updateValueAndValidity({onlySelf: true, emitEvent: true});
-    }
-  }
-
-  private fetchKeys(searchText?: string): Observable<Array<DataKey>> {
-    if (this.keySearchText !== searchText || this.latestKeySearchTextResult === null) {
-      this.keySearchText = searchText;
-      const dataKeyFilter = this.createDataKeyFilter(this.keySearchText);
-      return this.getKeys().pipe(
-        map(name => name.filter(dataKeyFilter)),
-        tap(res => this.latestKeySearchTextResult = res)
-      );
-    }
-    return of(this.latestKeySearchTextResult);
-  }
-
-  private getKeys(): Observable<Array<DataKey>> {
-    if (this.keyFetchObservable$ === null) {
-      let fetchObservable: Observable<Array<DataKey>>;
-      if (this.datasourceType === DatasourceType.function) {
-        const targetKeysList = this.widgetType === widgetType.alarm ? this.alarmKeys : this.functionTypeKeys;
-        fetchObservable = of(targetKeysList);
-      } else if (this.datasourceType === DatasourceType.entity && this.entityAliasId ||
-        this.datasourceType === DatasourceType.device && this.deviceId) {
-        const dataKeyTypes = [DataKeyType.timeseries];
-        if (this.isLatestDataKeys || this.widgetType === widgetType.latest || this.widgetType === widgetType.alarm) {
-          dataKeyTypes.push(DataKeyType.attribute);
-          dataKeyTypes.push(DataKeyType.entityField);
-          if (this.widgetType === widgetType.alarm) {
-            dataKeyTypes.push(DataKeyType.alarm);
-          }
-        }
-        if (this.datasourceType === DatasourceType.device) {
-          fetchObservable = this.callbacks.fetchEntityKeysForDevice(this.deviceId, dataKeyTypes);
-        } else {
-          fetchObservable = this.callbacks.fetchEntityKeys(this.entityAliasId, dataKeyTypes);
-        }
-      } else {
-        fetchObservable = of([]);
-      }
-      this.keyFetchObservable$ = fetchObservable.pipe(
-        publishReplay(1),
-        refCount()
-      );
-    }
-    return this.keyFetchObservable$;
-  }
-
-  private createDataKeyFilter(query: string): (key: DataKey) => boolean {
-    const lowercaseQuery = query.toLowerCase();
-    return key => key.name.toLowerCase().startsWith(lowercaseQuery);
-  }
-
-  private addKeyFromChipValue(chip: DataKey) {
-    this.modelValue = this.callbacks.generateDataKey(chip.name, chip.type, this.dataKeySettingsSchema);
+  private _generateDataKey(key: DataKey): DataKey {
+    key = this.callbacks.generateDataKey(key.name, key.type, this.dataKeySettingsForm, this.isLatestDataKeys,
+      this.dataKeySettingsFunction);
     if (!this.keyRowFormGroup.get('label').value) {
-      this.keyRowFormGroup.get('label').patchValue(this.modelValue.label, {emitEvent: false});
+      this.keyRowFormGroup.get('label').patchValue(key.label, {emitEvent: false});
     }
-    this.updateModel();
-    this.clearKeyChip('', false);
-  }
-
-  private clearKeySearchCache() {
-    this.keySearchText = '';
-    this.keyFetchObservable$ = null;
-    this.latestKeySearchTextResult = null;
+    if (this.timeSeriesChart) {
+      this.keyRowFormGroup.get('yAxis').patchValue(key.settings?.yAxisId, {emitEvent: false});
+      this.keyRowFormGroup.get('timeSeriesType').patchValue(key.settings?.type, {emitEvent: false});
+    }
+    return key;
   }
 
   private updateModel() {
-    const value: DataKey = this.keyRowFormGroup.value;
-    this.modelValue = {...this.modelValue, ...value};
+    this.modelValue = this.keyFormControl.value;
+    if (this.modelValue !== null) {
+      const value: DataKey = this.keyRowFormGroup.value;
+      this.modelValue = {...this.modelValue, ...value};
+      if (this.timeSeriesChart) {
+        this.modelValue.settings.yAxisId = (this.modelValue as any).yAxis;
+        this.modelValue.settings.type = (this.modelValue as any).timeSeriesType;
+        delete (this.modelValue as any).yAxis;
+        delete (this.modelValue as any).timeSeriesType;
+      }
+    }
     this.propagateChange(this.modelValue);
   }
 

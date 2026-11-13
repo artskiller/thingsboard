@@ -1,18 +1,5 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-License-Identifier: Apache-2.0
 package org.thingsboard.server.dao.sql.notification;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -41,7 +28,7 @@ public interface NotificationRequestRepository extends JpaRepository<Notificatio
     Page<NotificationRequestEntity> findByTenantIdAndOriginatorEntityType(UUID tenantId, EntityType originatorType, Pageable pageable);
 
     @Query(REQUEST_INFO_QUERY + " WHERE r.tenantId = :tenantId AND r.originatorEntityType = :originatorType " +
-            "AND (:searchText = '' OR t.name IS NOT NULL AND lower(t.name) LIKE lower(concat('%', :searchText, '%')))")
+            "AND (:searchText is NULL OR (t.name IS NOT NULL AND ilike(t.name, concat('%', :searchText, '%')) = true))")
     Page<NotificationRequestInfoEntity> findInfosByTenantIdAndOriginatorEntityTypeAndSearchText(@Param("tenantId") UUID tenantId,
                                                                                                 @Param("originatorType") EntityType originatorType,
                                                                                                 @Param("searchText") String searchText,
@@ -54,7 +41,7 @@ public interface NotificationRequestRepository extends JpaRepository<Notificatio
     List<UUID> findAllIdsByStatusAndRuleId(@Param("status") NotificationRequestStatus status,
                                            @Param("ruleId") UUID ruleId);
 
-    List<NotificationRequestEntity> findAllByRuleIdAndOriginatorEntityIdAndOriginatorEntityType(UUID ruleId, UUID originatorEntityId, EntityType originatorEntityType);
+    List<NotificationRequestEntity> findAllByRuleIdAndOriginatorEntityIdAndOriginatorEntityTypeAndStatus(UUID ruleId, UUID originatorEntityId, EntityType originatorEntityType, NotificationRequestStatus status);
 
     Page<NotificationRequestEntity> findAllByStatus(NotificationRequestStatus status, Pageable pageable);
 
@@ -70,9 +57,17 @@ public interface NotificationRequestRepository extends JpaRepository<Notificatio
     boolean existsByTenantIdAndStatusAndTemplateId(UUID tenantId, NotificationRequestStatus status, UUID templateId);
 
     @Transactional
-    int deleteAllByCreatedTimeBefore(long ts);
+    @Modifying
+    @Query(value = "DELETE FROM notification_request WHERE id IN " +
+            "(SELECT id FROM notification_request WHERE tenant_id = :tenantId AND created_time < :ts LIMIT :batchSize)",
+            nativeQuery = true)
+    int deleteByTenantIdAndCreatedTimeBeforeBatch(@Param("tenantId") UUID tenantId,
+                                                  @Param("ts") long ts,
+                                                  @Param("batchSize") int batchSize);
 
     @Transactional
-    void deleteByTenantId(UUID tenantId);
+    @Modifying
+    @Query("DELETE FROM NotificationRequestEntity r WHERE r.tenantId = :tenantId")
+    void deleteByTenantId(@Param("tenantId") UUID tenantId);
 
 }

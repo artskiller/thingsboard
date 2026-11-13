@@ -1,18 +1,6 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
+// SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
 package org.thingsboard.server.dao.service.validator;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,11 +11,9 @@ import org.thingsboard.server.common.data.StringUtils;
 import org.thingsboard.server.common.data.id.TenantId;
 import org.thingsboard.server.dao.customer.CustomerDao;
 import org.thingsboard.server.dao.customer.CustomerServiceImpl;
-import org.thingsboard.server.dao.exception.DataValidationException;
 import org.thingsboard.server.dao.service.DataValidator;
 import org.thingsboard.server.dao.tenant.TenantService;
-
-import java.util.Optional;
+import org.thingsboard.server.exception.DataValidationException;
 
 @Component
 public class CustomerDataValidator extends DataValidator<Customer> {
@@ -41,30 +27,21 @@ public class CustomerDataValidator extends DataValidator<Customer> {
     @Override
     protected void validateCreate(TenantId tenantId, Customer customer) {
         validateNumberOfEntitiesPerTenant(tenantId, EntityType.CUSTOMER);
-        customerDao.findCustomersByTenantIdAndTitle(customer.getTenantId().getId(), customer.getTitle()).ifPresent(
-                c -> {
-                    throw new DataValidationException("Customer with such title already exists!");
-                }
-        );
     }
 
     @Override
     protected Customer validateUpdate(TenantId tenantId, Customer customer) {
-        Optional<Customer> customerOpt = customerDao.findCustomersByTenantIdAndTitle(customer.getTenantId().getId(), customer.getTitle());
-        customerOpt.ifPresent(
-                c -> {
-                    if (!c.getId().equals(customer.getId())) {
-                        throw new DataValidationException("Customer with such title already exists!");
-                    }
-                }
-        );
-        return customerOpt.orElse(null);
+        Customer old = customerDao.findById(customer.getTenantId(), customer.getId().getId());
+        if (old == null) {
+            throw new DataValidationException("Can't update non existing customer!");
+        }
+        return old;
     }
 
     @Override
     protected void validateDataImpl(TenantId tenantId, Customer customer) {
         validateString("Customer title", customer.getTitle());
-        if (customer.getTitle().equals(CustomerServiceImpl.PUBLIC_CUSTOMER_TITLE)) {
+        if (customer.getTitle().equals(CustomerServiceImpl.PUBLIC_CUSTOMER_SUFFIX)) {
             throw new DataValidationException("'Public' title for customer is system reserved!");
         }
         if (!StringUtils.isEmpty(customer.getEmail())) {

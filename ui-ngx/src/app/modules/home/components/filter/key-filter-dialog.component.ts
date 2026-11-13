@@ -1,19 +1,5 @@
-///
-/// Copyright © 2016-2023 The Thingsboard Authors
-///
-/// Licensed under the Apache License, Version 2.0 (the "License");
-/// you may not use this file except in compliance with the License.
-/// You may obtain a copy of the License at
-///
-///     http://www.apache.org/licenses/LICENSE-2.0
-///
-/// Unless required by applicable law or agreed to in writing, software
-/// distributed under the License is distributed on an "AS IS" BASIS,
-/// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-/// See the License for the specific language governing permissions and
-/// limitations under the License.
-///
-
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-License-Identifier: Apache-2.0
 import { Component, ElementRef, Inject, OnDestroy, SkipSelf, ViewChild } from '@angular/core';
 import { ErrorStateMatcher } from '@angular/material/core';
 import { MAT_DIALOG_DATA, MatDialogRef } from '@angular/material/dialog';
@@ -35,7 +21,7 @@ import { TranslateService } from '@ngx-translate/core';
 import { entityFields } from '@shared/models/entity.models';
 import { Observable, of, Subject } from 'rxjs';
 import { filter, map, mergeMap, publishReplay, refCount, startWith, takeUntil } from 'rxjs/operators';
-import { isDefined } from '@core/utils';
+import { isBoolean, isDefined } from '@core/utils';
 import { EntityId } from '@shared/models/id/entity-id';
 import { DeviceProfileService } from '@core/http/device-profile.service';
 
@@ -50,10 +36,11 @@ export interface KeyFilterDialogData {
 }
 
 @Component({
-  selector: 'tb-key-filter-dialog',
-  templateUrl: './key-filter-dialog.component.html',
-  providers: [{provide: ErrorStateMatcher, useExisting: KeyFilterDialogComponent}],
-  styleUrls: ['./key-filter-dialog.component.scss']
+    selector: 'tb-key-filter-dialog',
+    templateUrl: './key-filter-dialog.component.html',
+    providers: [{ provide: ErrorStateMatcher, useExisting: KeyFilterDialogComponent }],
+    styleUrls: ['./key-filter-dialog.component.scss'],
+    standalone: false
 })
 export class KeyFilterDialogComponent extends
   DialogComponent<KeyFilterDialogComponent, KeyFilterInfo>
@@ -70,7 +57,8 @@ export class KeyFilterDialogComponent extends
   entityKeyTypes =
     this.data.telemetryKeysOnly ?
       [EntityKeyType.ATTRIBUTE, EntityKeyType.TIME_SERIES, EntityKeyType.CONSTANT] :
-      [EntityKeyType.ENTITY_FIELD, EntityKeyType.ATTRIBUTE, EntityKeyType.TIME_SERIES];
+      [EntityKeyType.ENTITY_FIELD, EntityKeyType.ATTRIBUTE, EntityKeyType.CLIENT_ATTRIBUTE,
+        EntityKeyType.SERVER_ATTRIBUTE, EntityKeyType.SHARED_ATTRIBUTE, EntityKeyType.TIME_SERIES];
 
   entityKeyTypeTranslations = entityKeyTypeTranslationMap;
 
@@ -120,22 +108,30 @@ export class KeyFilterDialogComponent extends
       this.keyFilterFormGroup.get('valueType').valueChanges.pipe(
         takeUntil(this.destroy$)
       ).subscribe((valueType: EntityKeyValueType) => {
-        const prevValue: EntityKeyValueType = this.keyFilterFormGroup.value.valueType;
+        const prevValueType: EntityKeyValueType = this.keyFilterFormGroup.value.valueType;
         const predicates: KeyFilterPredicate[] = this.keyFilterFormGroup.get('predicates').value;
-        if (prevValue && prevValue !== valueType && predicates && predicates.length) {
-          this.dialogs.confirm(this.translate.instant('filter.key-value-type-change-title'),
-            this.translate.instant('filter.key-value-type-change-message')).subscribe(
-            (result) => {
-              if (result) {
-                this.keyFilterFormGroup.get('predicates').setValue([]);
-              } else {
-                this.keyFilterFormGroup.get('valueType').setValue(prevValue, {emitEvent: false});
+        const value = this.keyFilterFormGroup.get('value')?.value;
+        if (prevValueType && prevValueType !== valueType) {
+          if (this.isConstantKeyType && this.data.telemetryKeysOnly) {
+            this.keyFilterFormGroup.get('value').setValue(null);
+          }
+          if (predicates && predicates.length) {
+            this.dialogs.confirm(this.translate.instant('filter.key-value-type-change-title'),
+              this.translate.instant('filter.key-value-type-change-message')).subscribe(
+              (result) => {
+                if (result) {
+                  this.keyFilterFormGroup.get('predicates').setValue([]);
+                } else {
+                  this.keyFilterFormGroup.get('valueType').setValue(prevValueType, {emitEvent: false});
+                  this.keyFilterFormGroup.get('value')?.setValue(value, {emitEvent: false});
+                }
               }
-            }
-          );
+            );
+          }
         }
-        if (valueType === EntityKeyValueType.BOOLEAN && this.isConstantKeyType) {
+        if (this.data.telemetryKeysOnly && this.isConstantKeyType && valueType === EntityKeyValueType.BOOLEAN) {
           this.keyFilterFormGroup.get('value').clearValidators();
+          this.keyFilterFormGroup.get('value').setValue(isBoolean(value) ? value : false);
           this.keyFilterFormGroup.get('value').updateValueAndValidity();
         }
       });

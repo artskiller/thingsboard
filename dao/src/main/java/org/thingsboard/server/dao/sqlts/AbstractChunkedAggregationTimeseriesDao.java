@@ -1,22 +1,12 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
+// SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
 package org.thingsboard.server.dao.sqlts;
 
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
@@ -25,21 +15,23 @@ import org.thingsboard.server.common.data.id.EntityId;
 import org.thingsboard.server.common.data.id.TenantId;
 import org.thingsboard.server.common.data.kv.Aggregation;
 import org.thingsboard.server.common.data.kv.DeleteTsKvQuery;
+import org.thingsboard.server.common.data.kv.IntervalType;
 import org.thingsboard.server.common.data.kv.ReadTsKvQuery;
 import org.thingsboard.server.common.data.kv.ReadTsKvQueryResult;
 import org.thingsboard.server.common.data.kv.TsKvEntry;
 import org.thingsboard.server.common.stats.StatsFactory;
 import org.thingsboard.server.dao.DaoUtil;
+import org.thingsboard.server.dao.dictionary.KeyDictionaryDao;
 import org.thingsboard.server.dao.model.sql.AbstractTsKvEntity;
+import org.thingsboard.server.dao.model.sqlts.ts.TsKvCompositeKey;
 import org.thingsboard.server.dao.model.sqlts.ts.TsKvEntity;
 import org.thingsboard.server.dao.sql.TbSqlBlockingQueueParams;
 import org.thingsboard.server.dao.sql.TbSqlBlockingQueueWrapper;
 import org.thingsboard.server.dao.sqlts.insert.InsertTsRepository;
 import org.thingsboard.server.dao.sqlts.ts.TsKvRepository;
 import org.thingsboard.server.dao.timeseries.TimeseriesDao;
+import org.thingsboard.server.dao.util.TimeUtils;
 
-import javax.annotation.PostConstruct;
-import javax.annotation.PreDestroy;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -57,9 +49,12 @@ public abstract class AbstractChunkedAggregationTimeseriesDao extends AbstractSq
     @Autowired
     protected InsertTsRepository<TsKvEntity> insertRepository;
 
-    protected TbSqlBlockingQueueWrapper<TsKvEntity> tsQueue;
+    protected TbSqlBlockingQueueWrapper<TsKvEntity, Void> tsQueue;
     @Autowired
     private StatsFactory statsFactory;
+
+    @Autowired
+    private KeyDictionaryDao keyDictionaryDao;
 
     @PostConstruct
     protected void init() {
@@ -93,11 +88,16 @@ public abstract class AbstractChunkedAggregationTimeseriesDao extends AbstractSq
         return service.submit(() -> {
             tsKvRepository.delete(
                     entityId.getId(),
-                    getOrSaveKeyId(query.getKey()),
+                    keyDictionaryDao.getOrSaveKeyId(query.getKey()),
                     query.getStartTs(),
                     query.getEndTs());
             return null;
         });
+    }
+
+    @Override
+    public ListenableFuture<TsKvEntry> findOneAsync(TenantId tenantId, EntityId entityId, long ts, String key) {
+        return Futures.immediateFuture(DaoUtil.getData(tsKvRepository.findById(new TsKvCompositeKey(entityId.getId(), keyDictionaryDao.getOrSaveKeyId(key), ts))));
     }
 
     @Override
@@ -112,16 +112,23 @@ public abstract class AbstractChunkedAggregationTimeseriesDao extends AbstractSq
 
     @Override
     public ListenableFuture<ReadTsKvQueryResult> findAllAsync(TenantId tenantId, EntityId entityId, ReadTsKvQuery query) {
-        if (query.getAggregation() == Aggregation.NONE) {
-            return Futures.immediateFuture(findAllAsyncWithLimit(entityId, query));
+        var aggParams = query.getAggParameters();
+        if (Aggregation.NONE.equals(aggParams.getAggregation()) || aggParams.getInterval() < 1) {
+            return service.submit(() -> findAllWithLimit(entityId, query));
         } else {
             List<ListenableFuture<Optional<TsKvEntity>>> futures = new ArrayList<>();
+            var intervalType = aggParams.getIntervalType();
             long startPeriod = query.getStartTs();
             long endPeriod = Math.max(query.getStartTs() + 1, query.getEndTs());
-            long step = query.getInterval();
             while (startPeriod < endPeriod) {
                 long startTs = startPeriod;
-                long endTs = Math.min(startPeriod + step, endPeriod);
+                long endTs;
+                if (IntervalType.MILLISECONDS.equals(intervalType)) {
+                    endTs = startPeriod + aggParams.getInterval();
+                } else {
+                    endTs = TimeUtils.calculateIntervalEnd(startTs, intervalType, aggParams.getTzId());
+                }
+                endTs = Math.min(endTs, endPeriod);
                 long ts = startTs + (endTs - startTs) / 2;
                 ListenableFuture<Optional<TsKvEntity>> aggregateTsKvEntry = findAndAggregateAsync(entityId, query.getKey(), startTs, endTs, ts, query.getAggregation());
                 futures.add(aggregateTsKvEntry);
@@ -131,8 +138,8 @@ public abstract class AbstractChunkedAggregationTimeseriesDao extends AbstractSq
         }
     }
 
-    private ReadTsKvQueryResult findAllAsyncWithLimit(EntityId entityId, ReadTsKvQuery query) {
-        Integer keyId = getOrSaveKeyId(query.getKey());
+    ReadTsKvQueryResult findAllWithLimit(EntityId entityId, ReadTsKvQuery query) {
+        Integer keyId = keyDictionaryDao.getOrSaveKeyId(query.getKey());
         List<TsKvEntity> tsKvEntities = tsKvRepository.findAllWithLimit(
                 entityId.getId(),
                 keyId,
@@ -160,7 +167,7 @@ public abstract class AbstractChunkedAggregationTimeseriesDao extends AbstractSq
     }
 
     protected TsKvEntity switchAggregation(EntityId entityId, String key, long startTs, long endTs, Aggregation aggregation) {
-        var keyId = getOrSaveKeyId(key);
+        var keyId = keyDictionaryDao.getOrSaveKeyId(key);
         switch (aggregation) {
             case AVG:
                 return tsKvRepository.findAvg(entityId.getId(), keyId, startTs, endTs);
@@ -186,4 +193,5 @@ public abstract class AbstractChunkedAggregationTimeseriesDao extends AbstractSq
                 throw new IllegalArgumentException("Not supported aggregation type: " + aggregation);
         }
     }
+
 }

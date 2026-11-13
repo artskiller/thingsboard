@@ -1,17 +1,6 @@
 --
--- Copyright © 2016-2023 The Thingsboard Authors
---
--- Licensed under the Apache License, Version 2.0 (the "License");
--- you may not use this file except in compliance with the License.
--- You may obtain a copy of the License at
---
---     http://www.apache.org/licenses/LICENSE-2.0
---
--- Unless required by applicable law or agreed to in writing, software
--- distributed under the License is distributed on an "AS IS" BASIS,
--- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
--- See the License for the specific language governing permissions and
--- limitations under the License.
+-- SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+-- SPDX-License-Identifier: Apache-2.0
 --
 
 CREATE TABLE IF NOT EXISTS ts_kv
@@ -27,11 +16,11 @@ CREATE TABLE IF NOT EXISTS ts_kv
     CONSTRAINT ts_kv_pkey PRIMARY KEY (entity_id, key, ts)
 ) PARTITION BY RANGE (ts);
 
-CREATE TABLE IF NOT EXISTS ts_kv_dictionary
+CREATE TABLE IF NOT EXISTS key_dictionary
 (
     key    varchar(255) NOT NULL,
     key_id serial UNIQUE,
-    CONSTRAINT ts_key_id_pkey PRIMARY KEY (key)
+    CONSTRAINT key_dictionary_id_pkey PRIMARY KEY (key)
 );
 
 CREATE OR REPLACE PROCEDURE drop_partitions_by_system_ttl(IN partition_type varchar, IN system_ttl bigint, INOUT deleted bigint)
@@ -72,10 +61,10 @@ BEGIN
                 IF partition_type = 'YEARS' THEN
                     FOR partition IN SELECT tablename
                                      FROM pg_tables
-                                     WHERE schemaname = 'public'
+                                     WHERE schemaname = current_schema()
                                        AND tablename like 'ts_kv_' || '%'
                                        AND tablename != 'ts_kv_latest'
-                                       AND tablename != 'ts_kv_dictionary'
+                                       AND tablename != 'key_dictionary'
                                        AND tablename != 'ts_kv_indefinite'
                                        AND tablename != partition_by_max_ttl_date
                         LOOP
@@ -93,10 +82,10 @@ BEGIN
                         ELSE
                             FOR partition IN SELECT tablename
                                              FROM pg_tables
-                                             WHERE schemaname = 'public'
+                                             WHERE schemaname = current_schema()
                                                AND tablename like 'ts_kv_' || '%'
                                                AND tablename != 'ts_kv_latest'
-                                               AND tablename != 'ts_kv_dictionary'
+                                               AND tablename != 'key_dictionary'
                                                AND tablename != 'ts_kv_indefinite'
                                                AND tablename != partition_by_max_ttl_date
                                 LOOP
@@ -135,10 +124,10 @@ BEGIN
                                 ELSE
                                     FOR partition IN SELECT tablename
                                                      FROM pg_tables
-                                                     WHERE schemaname = 'public'
+                                                     WHERE schemaname = current_schema()
                                                        AND tablename like 'ts_kv_' || '%'
                                                        AND tablename != 'ts_kv_latest'
-                                                       AND tablename != 'ts_kv_dictionary'
+                                                       AND tablename != 'key_dictionary'
                                                        AND tablename != 'ts_kv_indefinite'
                                                        AND tablename != partition_by_max_ttl_date
                                         LOOP
@@ -205,7 +194,7 @@ BEGIN
     IF partition IS NOT NULL THEN
         IF NOT EXISTS(SELECT
                       FROM pg_tables
-                      WHERE schemaname = 'public'
+                      WHERE schemaname = current_schema()
                         AND tablename = partition) THEN
             partition := NULL;
             RAISE NOTICE 'Failed to found partition by ttl';
@@ -272,7 +261,7 @@ BEGIN
     WHILE FOUND
         LOOP
             EXECUTE format(
-                    'select attribute_kv.long_v from attribute_kv where attribute_kv.entity_id = %L and attribute_kv.attribute_key = %L',
+                    'select attribute_kv.long_v from attribute_kv where attribute_kv.entity_id = %L and attribute_kv.attribute_key = (select key_id from key_dictionary where key = %L)',
                     tenant_id_record, 'TTL') INTO tenant_ttl;
             if tenant_ttl IS NULL THEN
                 tenant_ttl := system_ttl;
@@ -290,7 +279,7 @@ BEGIN
                 SELECT customer.id AS customer_id FROM customer WHERE customer.tenant_id = tenant_id_record
                 LOOP
                     EXECUTE format(
-                            'select attribute_kv.long_v from attribute_kv where attribute_kv.entity_id = %L and attribute_kv.attribute_key = %L',
+                            'select attribute_kv.long_v from attribute_kv where attribute_kv.entity_id = %L and attribute_kv.attribute_key = (select key_id from key_dictionary where key = %L)',
                             customer_id_record, 'TTL') INTO customer_ttl;
                     IF customer_ttl IS NULL THEN
                         customer_ttl_ts := tenant_ttl_ts;

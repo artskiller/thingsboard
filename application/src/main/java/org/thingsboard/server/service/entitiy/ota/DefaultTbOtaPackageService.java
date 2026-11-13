@@ -1,18 +1,5 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-License-Identifier: Apache-2.0
 package org.thingsboard.server.service.entitiy.ota;
 
 import lombok.AllArgsConstructor;
@@ -50,12 +37,12 @@ public class DefaultTbOtaPackageService extends AbstractTbEntityService implemen
         try {
             OtaPackageInfo savedOtaPackageInfo = otaPackageService.saveOtaPackageInfo(new OtaPackageInfo(saveOtaPackageInfoRequest), saveOtaPackageInfoRequest.isUsesUrl());
 
-            notificationEntityService.logEntityAction(tenantId, savedOtaPackageInfo.getId(), savedOtaPackageInfo,
+            logEntityActionService.logEntityAction(tenantId, savedOtaPackageInfo.getId(), savedOtaPackageInfo,
                     null, actionType, user);
 
             return savedOtaPackageInfo;
         } catch (Exception e) {
-            notificationEntityService.logEntityAction(tenantId, emptyId(EntityType.OTA_PACKAGE), saveOtaPackageInfoRequest,
+            logEntityActionService.logEntityAction(tenantId, emptyId(EntityType.OTA_PACKAGE), saveOtaPackageInfoRequest,
                     actionType, user, e);
             throw e;
         }
@@ -86,11 +73,11 @@ public class DefaultTbOtaPackageService extends AbstractTbEntityService implemen
             otaPackage.setContentType(contentType);
             otaPackage.setData(ByteBuffer.wrap(data));
             otaPackage.setDataSize((long) data.length);
-            OtaPackageInfo savedOtaPackage = otaPackageService.saveOtaPackage(otaPackage);
-            notificationEntityService.logEntityAction(tenantId, savedOtaPackage.getId(), savedOtaPackage, null, actionType, user);
+            OtaPackageInfo savedOtaPackage = new OtaPackageInfo(otaPackageService.saveOtaPackage(otaPackage));
+            logEntityActionService.logEntityAction(tenantId, savedOtaPackage.getId(), savedOtaPackage, null, actionType, user);
             return savedOtaPackage;
         } catch (Exception e) {
-            notificationEntityService.logEntityAction(tenantId, emptyId(EntityType.OTA_PACKAGE), actionType, user, e, otaPackageId.toString());
+            logEntityActionService.logEntityAction(tenantId, emptyId(EntityType.OTA_PACKAGE), actionType, user, e, otaPackageId.toString());
             throw e;
         }
     }
@@ -102,12 +89,13 @@ public class DefaultTbOtaPackageService extends AbstractTbEntityService implemen
         OtaPackageId otaPackageId = otaPackageInfo.getId();
         try {
             otaPackageService.deleteOtaPackage(tenantId, otaPackageId);
-            notificationEntityService.logEntityAction(tenantId, otaPackageId, otaPackageInfo, null,
+            logEntityActionService.logEntityAction(tenantId, otaPackageId, otaPackageInfo, null,
                     actionType, user, otaPackageInfo.getId().toString());
         } catch (Exception e) {
-            notificationEntityService.logEntityAction(tenantId, emptyId(EntityType.OTA_PACKAGE),
+            logEntityActionService.logEntityAction(tenantId, emptyId(EntityType.OTA_PACKAGE),
                     actionType, user, e, otaPackageId.toString());
             throw e;
         }
     }
+
 }

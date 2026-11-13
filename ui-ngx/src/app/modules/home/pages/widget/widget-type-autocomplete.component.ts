@@ -1,19 +1,6 @@
-///
-/// Copyright © 2016-2023 The Thingsboard Authors
-///
-/// Licensed under the Apache License, Version 2.0 (the "License");
-/// you may not use this file except in compliance with the License.
-/// You may obtain a copy of the License at
-///
-///     http://www.apache.org/licenses/LICENSE-2.0
-///
-/// Unless required by applicable law or agreed to in writing, software
-/// distributed under the License is distributed on an "AS IS" BASIS,
-/// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-/// See the License for the specific language governing permissions and
-/// limitations under the License.
-///
-
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
+// SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
 import {
   AfterViewInit,
   Component,
@@ -30,26 +17,23 @@ import { PageLink } from '@shared/models/page/page-link';
 import { Direction } from '@shared/models/page/sort-order';
 import { catchError, debounceTime, distinctUntilChanged, map, share, switchMap, tap } from 'rxjs/operators';
 import { emptyPageData } from '@shared/models/page/page-data';
-import { Store } from '@ngrx/store';
-import { AppState } from '@app/core/core.state';
 import { TranslateService } from '@ngx-translate/core';
 import { FloatLabelType, MatFormFieldAppearance, SubscriptSizing } from '@angular/material/form-field';
 import { WidgetTypeInfo } from '@shared/models/widget.models';
 import { coerceBoolean } from '@shared/decorators/coercion';
 import { WidgetService } from '@core/http/widget.service';
-import { DomSanitizer, SafeUrl } from '@angular/platform-browser';
-import { isDefinedAndNotNull } from '@core/utils';
 
 @Component({
-  selector: 'tb-widget-type-autocomplete',
-  templateUrl: './widget-type-autocomplete.component.html',
-  styleUrls: ['./widget-type-autocomplete.component.scss'],
-  providers: [{
-    provide: NG_VALUE_ACCESSOR,
-    useExisting: forwardRef(() => WidgetTypeAutocompleteComponent),
-    multi: true
-  }],
-  encapsulation: ViewEncapsulation.None
+    selector: 'tb-widget-type-autocomplete',
+    templateUrl: './widget-type-autocomplete.component.html',
+    styleUrls: ['./widget-type-autocomplete.component.scss'],
+    providers: [{
+            provide: NG_VALUE_ACCESSOR,
+            useExisting: forwardRef(() => WidgetTypeAutocompleteComponent),
+            multi: true
+        }],
+    encapsulation: ViewEncapsulation.None,
+    standalone: false
 })
 export class WidgetTypeAutocompleteComponent implements ControlValueAccessor, OnInit, AfterViewInit {
 
@@ -84,18 +68,24 @@ export class WidgetTypeAutocompleteComponent implements ControlValueAccessor, On
   @Input()
   excludeWidgetTypeIds: Array<string>;
 
+  @Input()
+  @coerceBoolean()
+  showHint: boolean;
+
+  @Input()
+  @coerceBoolean()
+  showError: boolean;
+
   @ViewChild('widgetTypeInput', {static: true}) widgetTypeInput: ElementRef;
 
   filteredWidgetTypes: Observable<Array<WidgetTypeInfo>>;
 
   searchText = '';
 
-  private propagateChange = (v: any) => { };
+  private propagateChange = (_v: any) => { };
 
-  constructor(private store: Store<AppState>,
-              public translate: TranslateService,
+  constructor(public translate: TranslateService,
               private widgetService: WidgetService,
-              private sanitizer: DomSanitizer,
               private fb: UntypedFormBuilder) {
     this.selectWidgetTypeFormGroup = this.fb.group({
       widgetType: [null]
@@ -106,7 +96,7 @@ export class WidgetTypeAutocompleteComponent implements ControlValueAccessor, On
     this.propagateChange = fn;
   }
 
-  registerOnTouched(fn: any): void {
+  registerOnTouched(_fn: any): void {
   }
 
   ngOnInit() {
@@ -114,7 +104,7 @@ export class WidgetTypeAutocompleteComponent implements ControlValueAccessor, On
       .pipe(
         debounceTime(150),
         tap(value => {
-          let modelValue;
+          let modelValue: WidgetTypeInfo;
           if (typeof value === 'string' || !value) {
             modelValue = null;
           } else {
@@ -173,13 +163,6 @@ export class WidgetTypeAutocompleteComponent implements ControlValueAccessor, On
     return widgetType ? widgetType.name : undefined;
   }
 
-  getPreviewImage(imageUrl: string | null): SafeUrl | string {
-    if (isDefinedAndNotNull(imageUrl)) {
-      return this.sanitizer.bypassSecurityTrustUrl(imageUrl);
-    }
-    return '/assets/widget-preview-empty.svg';
-  }
-
   fetchWidgetTypes(searchText?: string): Observable<Array<WidgetTypeInfo>> {
     this.searchText = searchText;
     const pageLink = new PageLink(10, 0, searchText, {
@@ -222,6 +205,10 @@ export class WidgetTypeAutocompleteComponent implements ControlValueAccessor, On
       this.widgetTypeInput.nativeElement.blur();
       this.widgetTypeInput.nativeElement.focus();
     }, 0);
+  }
+
+  textIsNotEmpty(text: string): boolean {
+    return (text && text.length > 0);
   }
 
 }

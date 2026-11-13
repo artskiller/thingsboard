@@ -1,20 +1,7 @@
-///
-/// Copyright © 2016-2023 The Thingsboard Authors
-///
-/// Licensed under the Apache License, Version 2.0 (the "License");
-/// you may not use this file except in compliance with the License.
-/// You may obtain a copy of the License at
-///
-///     http://www.apache.org/licenses/LICENSE-2.0
-///
-/// Unless required by applicable law or agreed to in writing, software
-/// distributed under the License is distributed on an "AS IS" BASIS,
-/// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-/// See the License for the specific language governing permissions and
-/// limitations under the License.
-///
-
-import { AfterViewInit, Component, ElementRef, forwardRef, Input, OnDestroy, OnInit, ViewChild } from '@angular/core';
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
+// SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
+import { Component, ElementRef, forwardRef, Input, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import { ControlValueAccessor, FormBuilder, FormGroup, NG_VALUE_ACCESSOR, Validators } from '@angular/forms';
 import { Observable, ReplaySubject, Subscription, throwError } from 'rxjs';
 import { debounceTime, map, mergeMap, share } from 'rxjs/operators';
@@ -22,10 +9,6 @@ import { TranslateService } from '@ngx-translate/core';
 import { EntitySubtype, EntityType } from '@shared/models/entity-type.models';
 import { MatAutocomplete, MatAutocompleteSelectedEvent } from '@angular/material/autocomplete';
 import { MatChipGrid, MatChipInputEvent } from '@angular/material/chips';
-import { AssetService } from '@core/http/asset.service';
-import { DeviceService } from '@core/http/device.service';
-import { EdgeService } from '@core/http/edge.service';
-import { EntityViewService } from '@core/http/entity-view.service';
 import { BroadcastService } from '@core/services/broadcast.service';
 import { COMMA, ENTER, SEMICOLON } from '@angular/cdk/keycodes';
 import { AlarmService } from '@core/http/alarm.service';
@@ -33,20 +16,25 @@ import { FloatLabelType, MatFormFieldAppearance, SubscriptSizing } from '@angula
 import { coerceArray, coerceBoolean } from '@shared/decorators/coercion';
 import { PageLink } from '@shared/models/page/page-link';
 import { PageData } from '@shared/models/page/page-data';
+import { UtilsService } from '@core/services/utils.service';
+import { EntityService } from '@core/http/entity.service';
+import { CalculatedFieldType } from "@shared/models/calculated-field.models";
+import { CalculatedFieldsService } from "@core/http/calculated-fields.service";
 
 @Component({
-  selector: 'tb-entity-subtype-list',
-  templateUrl: './entity-subtype-list.component.html',
-  styleUrls: [],
-  providers: [
-    {
-      provide: NG_VALUE_ACCESSOR,
-      useExisting: forwardRef(() => EntitySubTypeListComponent),
-      multi: true
-    }
-  ]
+    selector: 'tb-entity-subtype-list',
+    templateUrl: './entity-subtype-list.component.html',
+    styleUrls: [],
+    providers: [
+        {
+            provide: NG_VALUE_ACCESSOR,
+            useExisting: forwardRef(() => EntitySubTypeListComponent),
+            multi: true
+        }
+    ],
+    standalone: false
 })
-export class EntitySubTypeListComponent implements ControlValueAccessor, OnInit, AfterViewInit, OnDestroy {
+export class EntitySubTypeListComponent implements ControlValueAccessor, OnInit, OnDestroy {
 
   entitySubtypeListFormGroup: FormGroup;
 
@@ -78,6 +66,9 @@ export class EntitySubTypeListComponent implements ControlValueAccessor, OnInit,
 
   @Input()
   entityType: EntityType;
+
+  @Input()
+  calculatedFieldType: CalculatedFieldType;
 
   @Input()
   emptyInputPlaceholder: string;
@@ -116,20 +107,20 @@ export class EntitySubTypeListComponent implements ControlValueAccessor, OnInit,
 
   private dirty = false;
 
-  private propagateChange = (v: any) => { };
+  private propagateChange = (_v: any) => { };
 
   private hasPageDataEntitySubTypes = new Set<EntityType>([
-    EntityType.ALARM
+    EntityType.ALARM,
+    EntityType.CALCULATED_FIELD
   ]);
 
   constructor(private broadcast: BroadcastService,
               public translate: TranslateService,
-              private assetService: AssetService,
-              private deviceService: DeviceService,
-              private edgeService: EdgeService,
-              private entityViewService: EntityViewService,
               private alarmService: AlarmService,
-              private fb: FormBuilder) {
+              private calculatedFieldsService: CalculatedFieldsService,
+              private utils: UtilsService,
+              private fb: FormBuilder,
+              private entityService: EntityService) {
     this.entitySubtypeListFormGroup = this.fb.group({
       entitySubtypeList: [this.entitySubtypeList, this.required ? [Validators.required] : []],
       entitySubtype: [null]
@@ -166,18 +157,8 @@ export class EntitySubTypeListComponent implements ControlValueAccessor, OnInit,
           : this.translate.instant('device.any-device');
         this.secondaryPlaceholder = '+' + this.translate.instant('device.device-type');
         this.noSubtypesMathingText = 'device.no-device-types-matching';
-        this.subtypeListEmptyText = 'device.device-type-list-empty';
+        this.subtypeListEmptyText = 'device.device-profile-type-list-empty';
         this.broadcastSubscription = this.broadcast.on('deviceSaved', () => {
-          this.entitySubtypes = null;
-        });
-        break;
-      case EntityType.EDGE:
-        this.placeholder = this.required ? this.translate.instant('edge.enter-edge-type')
-          : this.translate.instant('edge.any-edge');
-        this.secondaryPlaceholder = '+' + this.translate.instant('edge.edge-type');
-        this.noSubtypesMathingText = 'edge.no-edge-types-matching';
-        this.subtypeListEmptyText = 'edge.edge-type-list-empty';
-        this.broadcastSubscription = this.broadcast.on('edgeSaved', () => {
           this.entitySubtypes = null;
         });
         break;
@@ -191,12 +172,29 @@ export class EntitySubTypeListComponent implements ControlValueAccessor, OnInit,
           this.entitySubtypes = null;
         });
         break;
+      case EntityType.EDGE:
+        this.placeholder = this.required ? this.translate.instant('edge.enter-edge-type')
+          : this.translate.instant('edge.any-edge');
+        this.secondaryPlaceholder = '+' + this.translate.instant('edge.edge-type');
+        this.noSubtypesMathingText = 'edge.no-edge-types-matching';
+        this.subtypeListEmptyText = 'edge.edge-type-list-empty';
+        this.broadcastSubscription = this.broadcast.on('edgeSaved', () => {
+          this.entitySubtypes = null;
+        });
+        break;
       case EntityType.ALARM:
         this.placeholder = this.required ? this.translate.instant('alarm.enter-alarm-type')
           : this.translate.instant('alarm.any-type');
         this.secondaryPlaceholder = '+' + this.translate.instant('alarm.alarm-type');
         this.noSubtypesMathingText = 'alarm.no-alarm-types-matching';
         this.subtypeListEmptyText = 'alarm.alarm-type-list-empty';
+        break;
+      case EntityType.CALCULATED_FIELD:
+        this.placeholder = this.required ? this.translate.instant('alarm.enter-alarm-rule-type')
+          : this.translate.instant('alarm-rule.any-type');
+        this.secondaryPlaceholder = '+' + this.translate.instant('alarm-rule.alarm-type');
+        this.noSubtypesMathingText = 'alarm-rule.no-alarm-rule-types-matching';
+        this.subtypeListEmptyText = 'alarm-rule.alarm-rule-type-list-empty';
         break;
     }
 
@@ -213,9 +211,6 @@ export class EntitySubTypeListComponent implements ControlValueAccessor, OnInit,
       mergeMap(name => this.fetchEntitySubtypes(name)),
       share()
     );
-  }
-
-  ngAfterViewInit(): void {
   }
 
   ngOnDestroy(): void {
@@ -263,9 +258,18 @@ export class EntitySubTypeListComponent implements ControlValueAccessor, OnInit,
     const value = (event.value || '').trim();
     if (value) {
       this.add(value);
+      this.clear('');
     }
-    this.clear('');
   }
+
+  addOnBlur(event: FocusEvent) {
+    if (!event.relatedTarget) {
+      return;
+    }
+    const value = this.entitySubtypeInput.nativeElement.value;
+    this.chipAdd({value} as MatChipInputEvent);
+  }
+
   remove(entitySubtype: string) {
     const index = this.entitySubtypeList.indexOf(entitySubtype);
     if (index >= 0) {
@@ -280,7 +284,7 @@ export class EntitySubTypeListComponent implements ControlValueAccessor, OnInit,
   }
 
   selected(event: MatAutocompleteSelectedEvent): void {
-    this.add(event.option.viewValue);
+    this.add(event.option.value);
     this.clear('');
   }
 
@@ -298,7 +302,7 @@ export class EntitySubTypeListComponent implements ControlValueAccessor, OnInit,
         } else {
           result = subTypes.filter(subType => searchText ? subType.toUpperCase().startsWith(searchText.toUpperCase()) : true);
         }
-        if (!result.length) {
+        if (!result.length && searchText.length) {
           result = [searchText];
         }
         return result;
@@ -310,38 +314,30 @@ export class EntitySubTypeListComponent implements ControlValueAccessor, OnInit,
     if (this.hasPageDataEntitySubTypes.has(this.entityType)) {
       const pageLink = new PageLink(25, 0, searchText);
       let subTypesPagesObservable: Observable<PageData<EntitySubtype>>;
+      let subTypesCfPagesObservable: Observable<PageData<string>>;
       switch (this.entityType) {
         case EntityType.ALARM:
           subTypesPagesObservable = this.alarmService.getAlarmTypes(pageLink, {ignoreLoading: true});
           break;
+        case EntityType.CALCULATED_FIELD:
+          subTypesCfPagesObservable = this.calculatedFieldsService.getCalculatedFieldNames(pageLink, CalculatedFieldType.ALARM, {ignoreLoading: true});
       }
       if (subTypesPagesObservable) {
         this.entitySubtypes = subTypesPagesObservable.pipe(
             map(subTypesPage => subTypesPage.data.map(subType => subType.type)),
+        );
+      } else if (subTypesCfPagesObservable) {
+        this.entitySubtypes = subTypesCfPagesObservable.pipe(
+          map(subTypesPage => subTypesPage.data)
         );
       } else {
         return throwError(null);
       }
     }
     if (!this.entitySubtypes) {
-      let subTypesObservable: Observable<Array<EntitySubtype>>;
-      switch (this.entityType) {
-        case EntityType.ASSET:
-          subTypesObservable = this.assetService.getAssetTypes({ignoreLoading: true});
-          break;
-        case EntityType.DEVICE:
-          subTypesObservable = this.deviceService.getDeviceTypes({ignoreLoading: true});
-          break;
-        case EntityType.EDGE:
-          subTypesObservable = this.edgeService.getEdgeTypes({ignoreLoading: true});
-          break;
-        case EntityType.ENTITY_VIEW:
-          subTypesObservable = this.entityViewService.getEntityViewTypes({ignoreLoading: true});
-          break;
-      }
+      const subTypesObservable = this.entityService.getEntitySubtypesObservable(this.entityType);
       if (subTypesObservable) {
         this.entitySubtypes = subTypesObservable.pipe(
-          map(subTypes => subTypes.map(subType => subType.type)),
           share({
             connector: () => new ReplaySubject(1),
             resetOnError: false,
@@ -370,6 +366,10 @@ export class EntitySubTypeListComponent implements ControlValueAccessor, OnInit,
       this.entitySubtypeInput.nativeElement.blur();
       this.entitySubtypeInput.nativeElement.focus();
     }, 0);
+  }
+
+  customTranslate(entity: string) {
+    return this.utils.customTranslation(entity, entity);
   }
 
 }

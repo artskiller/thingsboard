@@ -1,28 +1,14 @@
-///
-/// Copyright © 2016-2023 The Thingsboard Authors
-///
-/// Licensed under the Apache License, Version 2.0 (the "License");
-/// you may not use this file except in compliance with the License.
-/// You may obtain a copy of the License at
-///
-///     http://www.apache.org/licenses/LICENSE-2.0
-///
-/// Unless required by applicable law or agreed to in writing, software
-/// distributed under the License is distributed on an "AS IS" BASIS,
-/// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-/// See the License for the specific language governing permissions and
-/// limitations under the License.
-///
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // eslint-disable-next-line @typescript-eslint/triple-slash-reference
 /// <reference path="../../../../../../../src/typings/jquery.flot.typings.d.ts" />
 
 import {
-  DataKey,
+  DataKey, DataKeySettingsWithComparison,
   Datasource,
   DatasourceData,
   FormattedData,
-  JsonSettingsSchema,
   LegendConfig
 } from '@shared/models/widget.models';
 import { DataKeyType } from '@shared/models/telemetry/telemetry.models';
@@ -219,13 +205,7 @@ export interface TbFlotKeyThreshold {
   color: string;
 }
 
-export interface TbFlotKeyComparisonSettings {
-  showValuesForComparison: boolean;
-  comparisonValuesLabel: string;
-  color: string;
-}
-
-export interface TbFlotKeySettings {
+export interface TbFlotKeySettings extends DataKeySettingsWithComparison {
   excludeFromStacking: boolean;
   hideDataByDefault: boolean;
   disableDataHiding: boolean;
@@ -249,7 +229,6 @@ export interface TbFlotKeySettings {
   axisPosition: TbFlotYAxisPosition;
   axisTicksFormatter: string;
   thresholds: TbFlotKeyThreshold[];
-  comparisonSettings: TbFlotKeyComparisonSettings;
 }
 
 export interface TbFlotLatestKeySettings {

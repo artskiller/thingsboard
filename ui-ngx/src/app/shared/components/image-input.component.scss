@@ -1,18 +1,6 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
+// SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
 @import "../../../scss/constants";
 
 $containerHeight: 96px !default;
@@ -23,9 +11,12 @@ $previewSize: 78px !default;
   .tb-container {
     margin-top: 0;
     padding: 0 0 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
     label.tb-title {
       display: block;
-      padding-bottom: 8px;
+      padding-bottom: 0px;
     }
   }
 
@@ -38,7 +29,7 @@ $previewSize: 78px !default;
   }
 
   .image-container {
-    background: #F3F6FA;
+    position: relative;
     border-radius: 4px;
     border: 1px solid rgba(0, 0, 0, 0.05);
     padding: 8px 12px 8px 8px;
@@ -48,9 +39,21 @@ $previewSize: 78px !default;
     &.disabled {
       padding: 8px;
     }
+    &:before {
+      content: "";
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      border-radius: 4px;
+      background: var(--tb-primary-500);
+      opacity: 0.04;
+    }
   }
 
   .tb-image-preview-container {
+    z-index: 1;
     width: $previewSize;
     height: $previewSize;
     border: 1px solid rgba(0, 0, 0, 0.12);
@@ -70,6 +73,30 @@ $previewSize: 78px !default;
     max-width: $previewSize - 2px;
     height: auto;
     max-height: $previewSize  - 2px;
+  }
+
+  .tb-image-info-container {
+    display: flex;
+    gap: 12px;
+    font-size: 13px;
+    font-style: normal;
+    line-height: 16px;
+    letter-spacing: normal;
+  }
+
+  .tb-image-file-name {
+    width: 136px;
+    color: rgba(0, 0, 0, 0.54);
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .tb-image-file-hint {
+    color: rgba(0, 0, 0, 0.38);
+    font-weight: 400;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .file-input {

@@ -1,18 +1,6 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
+// SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
 package org.thingsboard.rule.engine.profile;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -48,6 +36,7 @@ import java.util.function.BiFunction;
 
 @Data
 @Slf4j
+@Deprecated
 class AlarmState {
 
     public static final String ERROR_MSG = "Failed to process alarm rule for Device [%s]: %s";
@@ -127,7 +116,7 @@ class AlarmState {
                     stateUpdate = clearAlarmState(stateUpdate, state);
                 }
                 AlarmApiCallResult result = ctx.getAlarmService().clearAlarm(
-                        ctx.getTenantId(), currentAlarm.getId(), System.currentTimeMillis(), createDetails(clearState)
+                        ctx.getTenantId(), currentAlarm.getOriginator(), currentAlarm.getId(), System.currentTimeMillis(), createDetails(clearState)
                 );
                 if (result.isCleared()) {
                     pushMsg(ctx, msg, new TbAlarmResult(false, false, true, result.getAlarm()), clearState);
@@ -244,27 +233,29 @@ class AlarmState {
                 return null;
             }
         } else {
-            currentAlarm = new Alarm();
-            currentAlarm.setType(alarmDefinition.getAlarmType());
-            currentAlarm.setAcknowledged(false);
-            currentAlarm.setCleared(false);
-            currentAlarm.setSeverity(severity);
+            var newAlarm = new Alarm();
+            newAlarm.setType(alarmDefinition.getAlarmType());
+            newAlarm.setAcknowledged(false);
+            newAlarm.setCleared(false);
+            newAlarm.setSeverity(severity);
             long startTs = dataSnapshot.getTs();
-            if (startTs == 0L) {
-                startTs = System.currentTimeMillis();
+            long currentTime = System.currentTimeMillis();
+            if (startTs == 0L || startTs > currentTime) {
+                startTs = currentTime;
             }
-            currentAlarm.setStartTs(startTs);
-            currentAlarm.setEndTs(currentAlarm.getStartTs());
-            currentAlarm.setDetails(createDetails(ruleState));
-            currentAlarm.setOriginator(originator);
-            currentAlarm.setTenantId(ctx.getTenantId());
-            currentAlarm.setPropagate(alarmDefinition.isPropagate());
-            currentAlarm.setPropagateToOwner(alarmDefinition.isPropagateToOwner());
-            currentAlarm.setPropagateToTenant(alarmDefinition.isPropagateToTenant());
+            newAlarm.setStartTs(startTs);
+            newAlarm.setEndTs(startTs);
+            newAlarm.setDetails(createDetails(ruleState));
+            newAlarm.setOriginator(originator);
+            newAlarm.setTenantId(ctx.getTenantId());
+            newAlarm.setPropagate(alarmDefinition.isPropagate());
+            newAlarm.setPropagateToOwner(alarmDefinition.isPropagateToOwner());
+            newAlarm.setPropagateToOwnerHierarchy(alarmDefinition.isPropagateToOwnerHierarchy());
+            newAlarm.setPropagateToTenant(alarmDefinition.isPropagateToTenant());
             if (alarmDefinition.getPropagateRelationTypes() != null) {
-                currentAlarm.setPropagateRelationTypes(alarmDefinition.getPropagateRelationTypes());
+                newAlarm.setPropagateRelationTypes(alarmDefinition.getPropagateRelationTypes());
             }
-            AlarmApiCallResult result = ctx.getAlarmService().createAlarm(AlarmCreateOrUpdateActiveRequest.fromAlarm(currentAlarm));
+            AlarmApiCallResult result = ctx.getAlarmService().createAlarm(AlarmCreateOrUpdateActiveRequest.fromAlarm(newAlarm));
             currentAlarm = result.getAlarm();
             return TbAlarmResult.fromAlarmResult(result);
         }

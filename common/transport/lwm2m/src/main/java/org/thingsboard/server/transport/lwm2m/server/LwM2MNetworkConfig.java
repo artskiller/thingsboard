@@ -1,18 +1,5 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-License-Identifier: Apache-2.0
 package org.thingsboard.server.transport.lwm2m.server;
 
 import org.eclipse.californium.core.config.CoapConfig;
@@ -27,8 +14,7 @@ import static org.eclipse.californium.core.config.CoapConfig.DEFAULT_BLOCKWISE_S
 
 public class LwM2MNetworkConfig {
 
-    public static Configuration getCoapConfig(Integer serverPortNoSec, Integer serverSecurePort, LwM2MTransportServerConfig config) {
-        Configuration coapConfig = new Configuration();
+    public static Configuration getCoapConfig(Configuration coapConfig, Integer serverPortNoSec, Integer serverSecurePort, LwM2MTransportServerConfig config) {
         coapConfig.set(CoapConfig.COAP_PORT, serverPortNoSec);
         coapConfig.set(CoapConfig.COAP_SECURE_PORT, serverSecurePort);
         /**

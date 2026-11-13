@@ -1,18 +1,5 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-License-Identifier: Apache-2.0
 package org.thingsboard.server.dao.timeseries;
 
 import com.datastax.oss.driver.api.core.cql.BoundStatement;
@@ -44,7 +31,6 @@ import org.thingsboard.server.dao.util.NoSqlTsLatestDao;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.ExecutionException;
 
 import static com.datastax.oss.driver.api.querybuilder.QueryBuilder.literal;
 
@@ -68,16 +54,6 @@ public class CassandraBaseTimeseriesLatestDao extends AbstractCassandraBaseTimes
     @Override
     public ListenableFuture<TsKvEntry> findLatest(TenantId tenantId, EntityId entityId, String key) {
         return findLatest(tenantId, entityId, key, rs -> convertResultToTsKvEntry(key, rs.one()));
-    }
-
-    @Override
-    public TsKvEntry findLatestSync(TenantId tenantId, EntityId entityId, String key) {
-        try {
-            return findLatest(tenantId, entityId, key, rs -> convertResultToTsKvEntry(key, rs.one())).get();
-        } catch (InterruptedException | ExecutionException e) {
-            log.error("[{}][{}] Failed to get latest entry for key: {} due to: ", tenantId, entityId, key, e);
-            throw new RuntimeException(e);
-        }
     }
 
     private <T> ListenableFuture<T> findLatest(TenantId tenantId, EntityId entityId, String key, java.util.function.Function<TbResultSet, T> function) {
@@ -111,7 +87,22 @@ public class CassandraBaseTimeseriesLatestDao extends AbstractCassandraBaseTimes
     }
 
     @Override
-    public ListenableFuture<Void> saveLatest(TenantId tenantId, EntityId entityId, TsKvEntry tsKvEntry) {
+    public ListenableFuture<List<String>> findAllKeysByEntityIdsAsync(TenantId tenantId, List<EntityId> entityIds) {
+        return Futures.immediateFuture(Collections.emptyList());
+    }
+
+    @Override
+    public List<TsKvEntry> findLatestByEntityIds(TenantId tenantId, List<EntityId> entityIds) {
+        return Collections.emptyList();
+    }
+
+    @Override
+    public ListenableFuture<List<TsKvEntry>> findLatestByEntityIdsAsync(TenantId tenantId, List<EntityId> entityIds) {
+        return Futures.immediateFuture(Collections.emptyList());
+    }
+
+    @Override
+    public ListenableFuture<Long> saveLatest(TenantId tenantId, EntityId entityId, TsKvEntry tsKvEntry) {
         BoundStatementBuilder stmtBuilder = new BoundStatementBuilder(getLatestStmt().bind());
         stmtBuilder.setString(0, entityId.getEntityType().name())
                 .setUuid(1, entityId.getId())
@@ -172,7 +163,7 @@ public class CassandraBaseTimeseriesLatestDao extends AbstractCassandraBaseTimes
             var entryList = result.getData();
             if (entryList.size() == 1) {
                 TsKvEntry entry = entryList.get(0);
-                return Futures.transform(saveLatest(tenantId, entityId, entryList.get(0)), v -> new TsKvLatestRemovingResult(entry), MoreExecutors.directExecutor());
+                return Futures.transform(saveLatest(tenantId, entityId, entryList.get(0)), v -> new TsKvLatestRemovingResult(entry, v), MoreExecutors.directExecutor());
             } else {
                 log.trace("Could not find new latest value for [{}], key - {}", entityId, query.getKey());
             }
@@ -190,7 +181,7 @@ public class CassandraBaseTimeseriesLatestDao extends AbstractCassandraBaseTimes
     }
 
     private ListenableFuture<List<TsKvEntry>> convertAsyncResultSetToTsKvEntryList(TbResultSet rs) {
-        return Futures.transform(rs.allRows(readResultsProcessingExecutor),
+        return Futures.transform(rs.allRows(readResultsProcessingExecutor, maxResultSetSizeBytes),
                 rows -> this.convertResultToTsKvEntryList(rows), readResultsProcessingExecutor);
     }
 

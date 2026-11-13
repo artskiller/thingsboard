@@ -1,19 +1,6 @@
-///
-/// Copyright © 2016-2023 The Thingsboard Authors
-///
-/// Licensed under the Apache License, Version 2.0 (the "License");
-/// you may not use this file except in compliance with the License.
-/// You may obtain a copy of the License at
-///
-///     http://www.apache.org/licenses/LICENSE-2.0
-///
-/// Unless required by applicable law or agreed to in writing, software
-/// distributed under the License is distributed on an "AS IS" BASIS,
-/// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-/// See the License for the specific language governing permissions and
-/// limitations under the License.
-///
-
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
+// SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
 import { Component, forwardRef, Input, OnDestroy, OnInit } from '@angular/core';
 import { ControlValueAccessor, NG_VALUE_ACCESSOR, UntypedFormBuilder, UntypedFormGroup } from '@angular/forms';
 import { isDefined } from '@core/utils';
@@ -25,23 +12,37 @@ import {
   legendPositionTranslationMap
 } from '@shared/models/widget.models';
 import { Subscription } from 'rxjs';
+import { coerceBoolean } from '@shared/decorators/coercion';
 
 // @dynamic
 @Component({
-  selector: 'tb-legend-config',
-  templateUrl: './legend-config.component.html',
-  styleUrls: ['./../widget-settings.scss'],
-  providers: [
-    {
-      provide: NG_VALUE_ACCESSOR,
-      useExisting: forwardRef(() => LegendConfigComponent),
-      multi: true
-    }
-  ]
+    selector: 'tb-legend-config',
+    templateUrl: './legend-config.component.html',
+    styleUrls: ['./../widget-settings.scss'],
+    providers: [
+        {
+            provide: NG_VALUE_ACCESSOR,
+            useExisting: forwardRef(() => LegendConfigComponent),
+            multi: true
+        }
+    ],
+    standalone: false
 })
 export class LegendConfigComponent implements OnInit, OnDestroy, ControlValueAccessor {
 
   @Input() disabled: boolean;
+
+  @Input()
+  @coerceBoolean()
+  hideDirection = false;
+
+  @Input()
+  @coerceBoolean()
+  hideValues = false;
+
+  @Input()
+  @coerceBoolean()
+  hideSortDataKeys = false;
 
   legendConfigForm: UntypedFormGroup;
   legendDirection = LegendDirection;
@@ -60,15 +61,19 @@ export class LegendConfigComponent implements OnInit, OnDestroy, ControlValueAcc
 
   ngOnInit(): void {
     this.legendConfigForm = this.fb.group({
-      direction: [null, []],
       position: [null, []],
-      showValues: [[], []],
-      sortDataKeys: [null, []]
+      showValues: [[], []]
     });
-    this.legendSettingsFormDirectionChanges$ = this.legendConfigForm.get('direction').valueChanges
+    if (!this.hideDirection) {
+      this.legendConfigForm.addControl('direction', this.fb.control([null, []]));
+      this.legendSettingsFormDirectionChanges$ = this.legendConfigForm.get('direction').valueChanges
       .subscribe((direction: LegendDirection) => {
         this.onDirectionChanged(direction);
       });
+    }
+    if (!this.hideSortDataKeys) {
+      this.legendConfigForm.addControl('sortDataKeys', this.fb.control([null, []]));
+    }
     this.legendSettingsFormChanges$ = this.legendConfigForm.valueChanges.subscribe(
       () => this.legendConfigUpdated()
     );
@@ -114,23 +119,34 @@ export class LegendConfigComponent implements OnInit, OnDestroy, ControlValueAcc
 
   writeValue(legendConfig: LegendConfig): void {
     if (legendConfig) {
-      this.legendConfigForm.patchValue({
-        direction: legendConfig.direction,
+      const value: any = {
         position: legendConfig.position,
-        showValues: this.getShowValues(legendConfig),
-        sortDataKeys: isDefined(legendConfig.sortDataKeys) ? legendConfig.sortDataKeys : false
-      }, {emitEvent: false});
+        showValues: this.getShowValues(legendConfig)
+      };
+      if (!this.hideDirection) {
+        value.direction = legendConfig.direction;
+      }
+      if (!this.hideSortDataKeys) {
+        value.sortDataKeys = isDefined(legendConfig.sortDataKeys) ? legendConfig.sortDataKeys : false;
+      }
+      this.legendConfigForm.patchValue(value, {emitEvent: false});
     }
-    this.onDirectionChanged(legendConfig.direction);
+    if (!this.hideDirection) {
+      this.onDirectionChanged(legendConfig?.direction);
+    }
   }
 
   private legendConfigUpdated() {
     const configValue = this.legendConfigForm.value;
     const legendConfig: Partial<LegendConfig> = {
-      direction: configValue.direction,
-      position: configValue.position,
-      sortDataKeys: configValue.sortDataKeys
+      position: configValue.position
     };
+    if (!this.hideDirection) {
+      legendConfig.direction = configValue.direction;
+    }
+    if (!this.hideSortDataKeys) {
+      legendConfig.sortDataKeys = configValue.sortDataKeys;
+    }
     this.setShowValues(configValue.showValues, legendConfig);
     this.propagateChange(legendConfig);
   }

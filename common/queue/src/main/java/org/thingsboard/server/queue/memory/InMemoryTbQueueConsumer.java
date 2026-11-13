@@ -1,18 +1,5 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-License-Identifier: Apache-2.0
 package org.thingsboard.server.queue.memory;
 
 import lombok.extern.slf4j.Slf4j;
@@ -31,7 +18,6 @@ public class InMemoryTbQueueConsumer<T extends TbQueueMsg> implements TbQueueCon
     private volatile Set<TopicPartitionInfo> partitions;
     private volatile boolean stopped;
     private volatile boolean subscribed;
-    private volatile boolean queueDeleted;
 
     public InMemoryTbQueueConsumer(InMemoryStorage storage, String topic) {
         this.storage = storage;
@@ -59,8 +45,14 @@ public class InMemoryTbQueueConsumer<T extends TbQueueMsg> implements TbQueueCon
     }
 
     @Override
+    public void stop() {
+        stopped = true;
+    }
+
+    @Override
     public void unsubscribe() {
         stopped = true;
+        subscribed = false;
     }
 
     @Override
@@ -105,13 +97,8 @@ public class InMemoryTbQueueConsumer<T extends TbQueueMsg> implements TbQueueCon
     }
 
     @Override
-    public void onQueueDelete() {
-        queueDeleted = true;
-    }
-
-    @Override
-    public boolean isQueueDeleted() {
-        return queueDeleted;
+    public Set<TopicPartitionInfo> getPartitions() {
+        return partitions;
     }
 
     @Override

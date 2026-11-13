@@ -1,23 +1,10 @@
-///
-/// Copyright © 2016-2023 The Thingsboard Authors
-///
-/// Licensed under the Apache License, Version 2.0 (the "License");
-/// you may not use this file except in compliance with the License.
-/// You may obtain a copy of the License at
-///
-///     http://www.apache.org/licenses/LICENSE-2.0
-///
-/// Unless required by applicable law or agreed to in writing, software
-/// distributed under the License is distributed on an "AS IS" BASIS,
-/// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-/// See the License for the specific language governing permissions and
-/// limitations under the License.
-///
-
-import { NgModule, Type } from '@angular/core';
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
+// SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
+import { NgModule } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { SharedModule } from '@shared/shared.module';
-import { IBasicWidgetConfigComponent } from '@home/components/widget/config/widget-config.component.models';
+import { WidgetService } from '@core/http/widget.service';
 import { WidgetConfigComponentsModule } from '@home/components/widget/config/widget-config-components.module';
 import {
   SimpleCardBasicConfigComponent
@@ -58,6 +45,97 @@ import {
 import {
   BatteryLevelBasicConfigComponent
 } from '@home/components/widget/config/basic/indicator/battery-level-basic-config.component';
+import {
+  WindSpeedDirectionBasicConfigComponent
+} from '@home/components/widget/config/basic/weather/wind-speed-direction-basic-config.component';
+import {
+  SignalStrengthBasicConfigComponent
+} from '@home/components/widget/config/basic/indicator/signal-strength-basic-config.component';
+import {
+  ValueChartCardBasicConfigComponent
+} from '@home/components/widget/config/basic/cards/value-chart-card-basic-config.component';
+import {
+  ProgressBarBasicConfigComponent
+} from '@home/components/widget/config/basic/cards/progress-bar-basic-config.component';
+import {
+  RadialGaugeBasicConfigComponent
+} from '@home/components/widget/config/basic/gauge/radial-gauge-basic-config.component';
+import {
+  ThermometerScaleGaugeBasicConfigComponent
+} from '@home/components/widget/config/basic/gauge/thermometer-scale-gauge-basic-config.component';
+import {
+  CompassGaugeBasicConfigComponent
+} from '@home/components/widget/config/basic/gauge/compass-gauge-basic-config.component';
+import {
+  LiquidLevelCardBasicConfigComponent
+} from '@home/components/widget/config/basic/indicator/liquid-level-card-basic-config.component';
+import {
+  DoughnutBasicConfigComponent
+} from '@home/components/widget/config/basic/chart/doughnut-basic-config.component';
+import {
+  RangeChartBasicConfigComponent
+} from '@home/components/widget/config/basic/chart/range-chart-basic-config.component';
+import {
+  BarChartWithLabelsBasicConfigComponent
+} from '@home/components/widget/config/basic/chart/bar-chart-with-labels-basic-config.component';
+import {
+  SingleSwitchBasicConfigComponent
+} from '@home/components/widget/config/basic/rpc/single-switch-basic-config.component';
+import {
+  ActionButtonBasicConfigComponent
+} from '@home/components/widget/config/basic/button/action-button-basic-config.component';
+import {
+  CommandButtonBasicConfigComponent
+} from '@home/components/widget/config/basic/button/command-button-basic-config.component';
+import {
+  PowerButtonBasicConfigComponent
+} from '@home/components/widget/config/basic/button/power-button-basic-config.component';
+import { SliderBasicConfigComponent } from '@home/components/widget/config/basic/rpc/slider-basic-config.component';
+import {
+  ToggleButtonBasicConfigComponent
+} from '@home/components/widget/config/basic/button/toggle-button-basic-config.component';
+import {
+  TimeSeriesChartBasicConfigComponent
+} from '@home/components/widget/config/basic/chart/time-series-chart-basic-config.component';
+import {
+  StatusWidgetBasicConfigComponent
+} from '@home/components/widget/config/basic/indicator/status-widget-basic-config.component';
+import {
+  PieChartBasicConfigComponent
+} from '@home/components/widget/config/basic/chart/pie-chart-basic-config.component';
+import {
+  BarChartBasicConfigComponent
+} from '@home/components/widget/config/basic/chart/bar-chart-basic-config.component';
+import {
+  PolarAreaChartBasicConfigComponent
+} from '@home/components/widget/config/basic/chart/polar-area-chart-basic-config.component';
+import {
+  RadarChartBasicConfigComponent
+} from '@home/components/widget/config/basic/chart/radar-chart-basic-config.component';
+import {
+  DigitalSimpleGaugeBasicConfigComponent
+} from '@home/components/widget/config/basic/gauge/digital-simple-gauge-basic-config.component';
+import { MobileAppQrCodeBasicConfigComponent } from '@home/components/widget/config/basic/cards/mobile-app-qr-code-basic-config.component';
+import {
+  LabelCardBasicConfigComponent
+} from '@home/components/widget/config/basic/cards/label-card-basic-config.component';
+import {
+  LabelValueCardBasicConfigComponent
+} from '@home/components/widget/config/basic/cards/label-value-card-basic-config.component';
+import {
+  UnreadNotificationBasicConfigComponent
+} from '@home/components/widget/config/basic/cards/unread-notification-basic-config.component';
+import { ScadaSymbolBasicConfigComponent } from '@home/components/widget/config/basic/scada/scada-symbol-basic-config.component';
+import {
+  SegmentedButtonBasicConfigComponent
+} from '@home/components/widget/config/basic/button/segmented-button-basic-config.component';
+import {
+  ValueStepperBasicConfigComponent
+} from '@home/components/widget/config/basic/rpc/value-stepper-basic-config.component';
+import { MapBasicConfigComponent } from '@home/components/widget/config/basic/map/map-basic-config.component';
+import {
+  HtmlContainerBasicConfigComponent
+} from '@home/components/widget/config/basic/html/html-container-basic-config.component';
 
 @NgModule({
   declarations: [
@@ -75,7 +153,40 @@ import {
     DataKeysPanelComponent,
     AlarmCountBasicConfigComponent,
     EntityCountBasicConfigComponent,
-    BatteryLevelBasicConfigComponent
+    BatteryLevelBasicConfigComponent,
+    WindSpeedDirectionBasicConfigComponent,
+    SignalStrengthBasicConfigComponent,
+    ValueChartCardBasicConfigComponent,
+    ProgressBarBasicConfigComponent,
+    RadialGaugeBasicConfigComponent,
+    ThermometerScaleGaugeBasicConfigComponent,
+    CompassGaugeBasicConfigComponent,
+    LiquidLevelCardBasicConfigComponent,
+    DoughnutBasicConfigComponent,
+    RangeChartBasicConfigComponent,
+    BarChartWithLabelsBasicConfigComponent,
+    SingleSwitchBasicConfigComponent,
+    ActionButtonBasicConfigComponent,
+    SegmentedButtonBasicConfigComponent,
+    CommandButtonBasicConfigComponent,
+    PowerButtonBasicConfigComponent,
+    SliderBasicConfigComponent,
+    ToggleButtonBasicConfigComponent,
+    ValueStepperBasicConfigComponent,
+    TimeSeriesChartBasicConfigComponent,
+    StatusWidgetBasicConfigComponent,
+    PieChartBasicConfigComponent,
+    BarChartBasicConfigComponent,
+    PolarAreaChartBasicConfigComponent,
+    RadarChartBasicConfigComponent,
+    DigitalSimpleGaugeBasicConfigComponent,
+    MobileAppQrCodeBasicConfigComponent,
+    LabelCardBasicConfigComponent,
+    LabelValueCardBasicConfigComponent,
+    UnreadNotificationBasicConfigComponent,
+    ScadaSymbolBasicConfigComponent,
+    MapBasicConfigComponent,
+    HtmlContainerBasicConfigComponent
   ],
   imports: [
     CommonModule,
@@ -97,21 +208,44 @@ import {
     DataKeysPanelComponent,
     AlarmCountBasicConfigComponent,
     EntityCountBasicConfigComponent,
-    BatteryLevelBasicConfigComponent
+    BatteryLevelBasicConfigComponent,
+    WindSpeedDirectionBasicConfigComponent,
+    SignalStrengthBasicConfigComponent,
+    ValueChartCardBasicConfigComponent,
+    ProgressBarBasicConfigComponent,
+    RadialGaugeBasicConfigComponent,
+    ThermometerScaleGaugeBasicConfigComponent,
+    CompassGaugeBasicConfigComponent,
+    LiquidLevelCardBasicConfigComponent,
+    DoughnutBasicConfigComponent,
+    RangeChartBasicConfigComponent,
+    BarChartWithLabelsBasicConfigComponent,
+    SingleSwitchBasicConfigComponent,
+    ActionButtonBasicConfigComponent,
+    SegmentedButtonBasicConfigComponent,
+    CommandButtonBasicConfigComponent,
+    PowerButtonBasicConfigComponent,
+    SliderBasicConfigComponent,
+    ToggleButtonBasicConfigComponent,
+    ValueStepperBasicConfigComponent,
+    TimeSeriesChartBasicConfigComponent,
+    StatusWidgetBasicConfigComponent,
+    PieChartBasicConfigComponent,
+    BarChartBasicConfigComponent,
+    PolarAreaChartBasicConfigComponent,
+    RadarChartBasicConfigComponent,
+    ScadaSymbolBasicConfigComponent,
+    DigitalSimpleGaugeBasicConfigComponent,
+    MobileAppQrCodeBasicConfigComponent,
+    LabelCardBasicConfigComponent,
+    LabelValueCardBasicConfigComponent,
+    UnreadNotificationBasicConfigComponent,
+    MapBasicConfigComponent,
+    HtmlContainerBasicConfigComponent
   ]
 })
 export class BasicWidgetConfigModule {
+  constructor(private widgetService: WidgetService) {
+    this.widgetService.registerBasicWidgetConfigComponents(this.constructor)
+  }
 }
-
-export const basicWidgetConfigComponentsMap: {[key: string]: Type<IBasicWidgetConfigComponent>} = {
-  'tb-simple-card-basic-config': SimpleCardBasicConfigComponent,
-  'tb-entities-table-basic-config': EntitiesTableBasicConfigComponent,
-  'tb-timeseries-table-basic-config': TimeseriesTableBasicConfigComponent,
-  'tb-flot-basic-config': FlotBasicConfigComponent,
-  'tb-alarms-table-basic-config': AlarmsTableBasicConfigComponent,
-  'tb-value-card-basic-config': ValueCardBasicConfigComponent,
-  'tb-aggregated-value-card-basic-config': AggregatedValueCardBasicConfigComponent,
-  'tb-alarm-count-basic-config': AlarmCountBasicConfigComponent,
-  'tb-entity-count-basic-config': EntityCountBasicConfigComponent,
-  'tb-battery-level-basic-config': BatteryLevelBasicConfigComponent
-};

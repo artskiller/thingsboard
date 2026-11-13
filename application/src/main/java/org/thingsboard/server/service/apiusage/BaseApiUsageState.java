@@ -1,18 +1,6 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
+// SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
 package org.thingsboard.server.service.apiusage;
 
 import lombok.Builder;
@@ -40,7 +28,8 @@ public abstract class BaseApiUsageState {
     private final Map<ApiUsageRecordKey, Long> gaugesReportCycles = new HashMap<>();
 
     @Getter
-    private final ApiUsageState apiUsageState;
+    @Setter
+    private ApiUsageState apiUsageState;
     @Getter
     private volatile long currentCycleTs;
     @Getter
@@ -153,6 +142,10 @@ public abstract class BaseApiUsageState {
                 return apiUsageState.getSmsExecState();
             case ALARM:
                 return apiUsageState.getAlarmExecState();
+            case REPORT:
+                return apiUsageState.getReportExecState();
+            case AI:
+                return apiUsageState.getAiState();
             default:
                 return ApiUsageStateValue.ENABLED;
         }
@@ -185,6 +178,12 @@ public abstract class BaseApiUsageState {
             case ALARM:
                 apiUsageState.setAlarmExecState(value);
                 break;
+            case REPORT:
+                apiUsageState.setReportExecState(value);
+                break;
+            case AI:
+                apiUsageState.setAiState(value);
+                break;
         }
         return !currentValue.equals(value);
     }
@@ -197,6 +196,16 @@ public abstract class BaseApiUsageState {
 
     public EntityId getEntityId() {
         return getApiUsageState().getEntityId();
+    }
+
+    @Override
+    public String toString() {
+        return "BaseApiUsageState{" +
+                "apiUsageState=" + apiUsageState +
+                ", currentCycleTs=" + currentCycleTs +
+                ", nextCycleTs=" + nextCycleTs +
+                ", currentHourTs=" + currentHourTs +
+                '}';
     }
 
     @Data

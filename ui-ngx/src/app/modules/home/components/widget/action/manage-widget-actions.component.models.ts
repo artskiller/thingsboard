@@ -1,44 +1,32 @@
-///
-/// Copyright © 2016-2023 The Thingsboard Authors
-///
-/// Licensed under the Apache License, Version 2.0 (the "License");
-/// you may not use this file except in compliance with the License.
-/// You may obtain a copy of the License at
-///
-///     http://www.apache.org/licenses/LICENSE-2.0
-///
-/// Unless required by applicable law or agreed to in writing, software
-/// distributed under the License is distributed on an "AS IS" BASIS,
-/// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-/// See the License for the specific language governing permissions and
-/// limitations under the License.
-///
-
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
+// SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
 import {
-  CustomActionDescriptor,
+  CellClickColumnInfo,
   WidgetActionDescriptor,
   WidgetActionSource,
+  WidgetActionsMap,
+  WidgetActionType,
   widgetActionTypeTranslationMap
 } from '@app/shared/models/widget.models';
+import { EntityAlias } from '@shared/models/alias.models';
 import { CollectionViewer, DataSource } from '@angular/cdk/collections';
-import { BehaviorSubject, Observable, of, ReplaySubject } from 'rxjs';
+import { BehaviorSubject, Observable, of, ReplaySubject, shareReplay } from 'rxjs';
 import { emptyPageData, PageData } from '@shared/models/page/page-data';
 import { TranslateService } from '@ngx-translate/core';
 import { PageLink } from '@shared/models/page/page-link';
-import { catchError, map, publishReplay, refCount } from 'rxjs/operators';
+import { catchError, map } from 'rxjs/operators';
 import { UtilsService } from '@core/services/utils.service';
-import { deepClone, isDefined, isUndefined } from '@core/utils';
-
-import customSampleJs from '!raw-loader!./custom-sample-js.raw';
-import customSampleCss from '!raw-loader!./custom-sample-css.raw';
-import customSampleHtml from '!raw-loader!./custom-sample-html.raw';
+import { deepClone, guid, isDefinedAndNotNull } from '@core/utils';
 
 export interface WidgetActionCallbacks {
   fetchDashboardStates: (query: string) => Array<string>;
+  fetchCellClickColumns: () => Array<CellClickColumnInfo>;
+  fetchEntityAliases?: () => Array<EntityAlias>;
 }
 
 export interface WidgetActionsData {
-  actionsMap: {[actionSourceId: string]: Array<WidgetActionDescriptor>};
+  actionsMap: WidgetActionsMap;
   actionSources: {[actionSourceId: string]: WidgetActionSource};
 }
 
@@ -48,32 +36,78 @@ export interface WidgetActionDescriptorInfo extends WidgetActionDescriptor {
   typeName?: string;
 }
 
-export function toWidgetActionDescriptor(action: WidgetActionDescriptorInfo): WidgetActionDescriptor {
+export const toWidgetActionDescriptor = (action: WidgetActionDescriptorInfo): WidgetActionDescriptor => {
   const copy = deepClone(action);
   delete copy.actionSourceId;
   delete copy.actionSourceName;
   delete copy.typeName;
   return copy;
+};
+
+export const stripRuntimeWidgetActionFields = <T extends WidgetActionDescriptor>(action: T): T => {
+  delete action.displayName;
+  delete action.customImports;
+  return action;
+};
+
+export interface WidgetActionsImportResult {
+  imported: number;
+  skipped: number;
+  columnIndexesReset: number;
 }
 
-export function toCustomAction(action: WidgetActionDescriptorInfo): CustomActionDescriptor {
-  let result: CustomActionDescriptor;
-  if (!action || (isUndefined(action.customFunction) && isUndefined(action.customHtml) && isUndefined(action.customCss))) {
-    result = {
-      customHtml: customSampleHtml,
-      customCss: customSampleCss,
-      customFunction: customSampleJs
-    };
-  } else {
-    result = {
-      customHtml: action.customHtml,
-      customCss: action.customCss,
-      customFunction: action.customFunction
-    };
+export const mergeWidgetActionsMap = (targetMap: WidgetActionsMap, importedMap: WidgetActionsMap,
+                                      actionSources: {[actionSourceId: string]: WidgetActionSource},
+                                      allowedActionTypes: WidgetActionType[],
+                                      fetchCellClickColumnsCount: () => number): WidgetActionsImportResult => {
+  const result: WidgetActionsImportResult = {imported: 0, skipped: 0, columnIndexesReset: 0};
+  let cellClickColumnsCount: number;
+  for (const actionSourceId of Object.keys(importedMap)) {
+    const actionSource = Object.prototype.hasOwnProperty.call(actionSources, actionSourceId) ?
+      actionSources[actionSourceId] : null;
+    const importedActions = importedMap[actionSourceId];
+    if (!actionSource) {
+      result.skipped += importedActions.length;
+      continue;
+    }
+    for (const importedAction of importedActions) {
+      let targetActions = targetMap[actionSourceId];
+      if (!allowedActionTypes.includes(importedAction.type) ||
+          (!actionSource.multiple && targetActions?.length)) {
+        result.skipped++;
+        continue;
+      }
+      const action = stripRuntimeWidgetActionFields(deepClone(importedAction));
+      action.id = guid();
+      if (actionSourceId === 'cellClick' && isDefinedAndNotNull(action.columnIndex)) {
+        cellClickColumnsCount ??= fetchCellClickColumnsCount();
+        if (!Number.isInteger(action.columnIndex) || action.columnIndex < 0 ||
+            cellClickColumnsCount - 1 < action.columnIndex ||
+            targetActions?.some(targetAction => targetAction.columnIndex === action.columnIndex)) {
+          action.columnIndex = null;
+          result.columnIndexesReset++;
+        }
+      }
+      if (!targetActions) {
+        targetActions = [];
+        targetMap[actionSourceId] = targetActions;
+      }
+      action.name = uniqueWidgetActionName(action.name, targetActions);
+      targetActions.push(action);
+      result.imported++;
+    }
   }
-  result.customResources = action && isDefined(action.customResources) ? deepClone(action.customResources) : [];
   return result;
-}
+};
+
+const uniqueWidgetActionName = (name: string, actions: Array<WidgetActionDescriptor>): string => {
+  let result = name;
+  let index = 2;
+  while (actions.some(action => action.name === result)) {
+    result = `${name} (${index++})`;
+  }
+  return result;
+};
 
 export class WidgetActionsDatasource implements DataSource<WidgetActionDescriptorInfo> {
 
@@ -84,17 +118,17 @@ export class WidgetActionsDatasource implements DataSource<WidgetActionDescripto
 
   private allActions: Observable<Array<WidgetActionDescriptorInfo>>;
 
-  private actionsMap: {[actionSourceId: string]: Array<WidgetActionDescriptor>};
+  private actionsMap: WidgetActionsMap;
   private actionSources: {[actionSourceId: string]: WidgetActionSource};
 
   constructor(private translate: TranslateService,
               private utils: UtilsService) {}
 
-  connect(collectionViewer: CollectionViewer): Observable<WidgetActionDescriptorInfo[] | ReadonlyArray<WidgetActionDescriptorInfo>> {
+  connect(_collectionViewer: CollectionViewer): Observable<WidgetActionDescriptorInfo[] | ReadonlyArray<WidgetActionDescriptorInfo>> {
     return this.actionsSubject.asObservable();
   }
 
-  disconnect(collectionViewer: CollectionViewer): void {
+  disconnect(_collectionViewer: CollectionViewer): void {
     this.actionsSubject.complete();
     this.pageDataSubject.complete();
   }
@@ -137,8 +171,7 @@ export class WidgetActionsDatasource implements DataSource<WidgetActionDescripto
         });
       }
       this.allActions = of(actions).pipe(
-        publishReplay(1),
-        refCount()
+        shareReplay(1)
       );
     }
     return this.allActions;

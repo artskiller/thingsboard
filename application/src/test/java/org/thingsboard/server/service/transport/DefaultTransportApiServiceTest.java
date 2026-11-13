@@ -1,28 +1,17 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
+// SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
 package org.thingsboard.server.service.transport;
 
 
-import com.google.common.util.concurrent.Futures;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.boot.test.mock.mockito.SpyBean;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.context.ContextConfiguration;
 import org.springframework.test.context.junit4.SpringRunner;
 import org.thingsboard.server.cache.ota.OtaPackageDataCache;
@@ -36,21 +25,23 @@ import org.thingsboard.server.common.data.id.DeviceId;
 import org.thingsboard.server.common.data.security.DeviceCredentials;
 import org.thingsboard.server.common.data.security.DeviceCredentialsType;
 import org.thingsboard.server.common.msg.EncryptionUtil;
+import org.thingsboard.server.dao.customer.CustomerService;
 import org.thingsboard.server.dao.device.DeviceCredentialsService;
 import org.thingsboard.server.dao.device.DeviceProfileService;
 import org.thingsboard.server.dao.device.DeviceProvisionService;
 import org.thingsboard.server.dao.device.DeviceService;
 import org.thingsboard.server.dao.device.provision.ProvisionResponse;
 import org.thingsboard.server.dao.device.provision.ProvisionResponseStatus;
+import org.thingsboard.server.dao.group.EntityGroupService;
 import org.thingsboard.server.dao.ota.OtaPackageService;
 import org.thingsboard.server.dao.queue.QueueService;
 import org.thingsboard.server.dao.relation.RelationService;
+import org.thingsboard.server.dao.resource.ResourceService;
 import org.thingsboard.server.dao.tenant.TbTenantProfileCache;
-import org.thingsboard.server.queue.util.DataDecodingEncodingService;
+import org.thingsboard.server.gen.transport.TransportProtos;
 import org.thingsboard.server.service.apiusage.TbApiUsageStateService;
 import org.thingsboard.server.service.executors.DbCallbackExecutorService;
 import org.thingsboard.server.service.profile.TbDeviceProfileCache;
-import org.thingsboard.server.service.resource.TbResourceService;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -62,46 +53,75 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.BDDMockito.willReturn;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @Slf4j
 @RunWith(SpringRunner.class)
-@ContextConfiguration(classes = DefaultTransportApiService.class)
+@ContextConfiguration(classes = DefaultTransportApiServiceTest.TestConfig.class)
 public class DefaultTransportApiServiceTest {
 
-    @MockBean
+    @Configuration
+    static class TestConfig {
+        @Bean
+        public DefaultTransportApiService defaultTransportApiService(TbDeviceProfileCache deviceProfileCache,
+                                                                     TbTenantProfileCache tenantProfileCache,
+                                                                     TbApiUsageStateService apiUsageStateService,
+                                                                     DeviceService deviceService,
+                                                                     DeviceProfileService deviceProfileService,
+                                                                     RelationService relationService,
+                                                                     DeviceCredentialsService deviceCredentialsService,
+                                                                     TbClusterService tbClusterService,
+                                                                     DeviceProvisionService deviceProvisionService,
+                                                                     ResourceService resourceService,
+                                                                     OtaPackageService otaPackageService,
+                                                                     OtaPackageDataCache otaPackageDataCache,
+                                                                     QueueService queueService,
+                                                                     EntityGroupService entityGroupService,
+                                                                     CustomerService customerService) {
+            return new DefaultTransportApiService(deviceProfileCache, tenantProfileCache, apiUsageStateService,
+                    deviceService, deviceProfileService, relationService, deviceCredentialsService, tbClusterService,
+                    deviceProvisionService, resourceService, otaPackageService, otaPackageDataCache, queueService,
+                    entityGroupService, customerService);
+        }
+    }
+
+    @MockitoBean
     protected TbDeviceProfileCache deviceProfileCache;
-    @MockBean
+    @MockitoBean
     protected TbTenantProfileCache tenantProfileCache;
-    @MockBean
+    @MockitoBean
     protected TbApiUsageStateService apiUsageStateService;
-    @MockBean
+    @MockitoBean
     protected DeviceService deviceService;
-    @MockBean
+    @MockitoBean
     protected DeviceProfileService deviceProfileService;
-    @MockBean
+    @MockitoBean
     protected RelationService relationService;
-    @MockBean
+    @MockitoBean
     protected DeviceCredentialsService deviceCredentialsService;
-    @MockBean
+    @MockitoBean
     protected DbCallbackExecutorService dbCallbackExecutorService;
-    @MockBean
+    @MockitoBean
     protected TbClusterService tbClusterService;
-    @MockBean
-    protected DataDecodingEncodingService dataDecodingEncodingService;
-    @MockBean
+    @MockitoBean
     protected DeviceProvisionService deviceProvisionService;
-    @MockBean
-    protected TbResourceService resourceService;
-    @MockBean
+    @MockitoBean
+    protected ResourceService resourceService;
+    @MockitoBean
     protected OtaPackageService otaPackageService;
-    @MockBean
+    @MockitoBean
     protected OtaPackageDataCache otaPackageDataCache;
-    @MockBean
+    @MockitoBean
     protected QueueService queueService;
-    @SpyBean
+    @MockitoBean
+    protected EntityGroupService groupService;
+    @MockitoBean
+    protected CustomerService customerService;
+    @MockitoSpyBean
     DefaultTransportApiService service;
 
     private String certificateChain;
@@ -123,10 +143,12 @@ public class DefaultTransportApiServiceTest {
     @Test
     public void validateExistingDeviceByX509CertificateStrategy() {
         var device = createDevice();
-        when(deviceService.findDeviceByIdAsync(any(), any())).thenReturn(Futures.immediateFuture(device));
 
         var deviceCredentials = createDeviceCredentials(chain[0], device.getId());
         when(deviceCredentialsService.findDeviceCredentialsByCredentialsId(any())).thenReturn(deviceCredentials);
+
+        TransportProtos.TransportApiResponseMsg response = mock(TransportProtos.TransportApiResponseMsg.class);
+        willReturn(response).given(service).getDeviceInfo(deviceCredentials);
 
         service.validateOrCreateDeviceX509Certificate(certificateChain);
         verify(deviceCredentialsService, times(1)).findDeviceCredentialsByCredentialsId(any());
@@ -139,7 +161,6 @@ public class DefaultTransportApiServiceTest {
 
         var device = createDevice();
         when(deviceService.findDeviceByTenantIdAndName(any(), any())).thenReturn(device);
-        when(deviceService.findDeviceByIdAsync(any(), any())).thenReturn(Futures.immediateFuture(device));
 
         var deviceCredentials = createDeviceCredentials(chain[0], device.getId());
         when(deviceCredentialsService.findDeviceCredentialsByCredentialsId(any())).thenReturn(null);
@@ -148,9 +169,12 @@ public class DefaultTransportApiServiceTest {
         var provisionResponse = createProvisionResponse(deviceCredentials);
         when(deviceProvisionService.provisionDeviceViaX509Chain(any(), any())).thenReturn(provisionResponse);
 
+        TransportProtos.TransportApiResponseMsg response = mock(TransportProtos.TransportApiResponseMsg.class);
+        willReturn(response).given(service).getDeviceInfo(deviceCredentials);
+
         service.validateOrCreateDeviceX509Certificate(certificateChain);
         verify(deviceProfileService, times(1)).findDeviceProfileByProvisionDeviceKey(any());
-        verify(deviceService, times(1)).findDeviceByIdAsync(any(), any());
+        verify(service, times(1)).getDeviceInfo(any());
         verify(deviceCredentialsService, times(1)).findDeviceCredentialsByCredentialsId(any());
         verify(deviceProvisionService, times(1)).provisionDeviceViaX509Chain(any(), any());
     }

@@ -1,25 +1,17 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
+// SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
 package org.thingsboard.server.dao.model.sql;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.Table;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
-import org.hibernate.annotations.Type;
-import org.hibernate.annotations.TypeDef;
 import org.thingsboard.server.common.data.id.DeviceId;
 import org.thingsboard.server.common.data.id.RpcId;
 import org.thingsboard.server.common.data.id.TenantId;
@@ -27,19 +19,16 @@ import org.thingsboard.server.common.data.rpc.Rpc;
 import org.thingsboard.server.common.data.rpc.RpcStatus;
 import org.thingsboard.server.dao.model.BaseEntity;
 import org.thingsboard.server.dao.model.BaseSqlEntity;
-import org.thingsboard.server.dao.util.mapping.JsonStringType;
+import org.thingsboard.server.dao.util.mapping.JsonConverter;
 
-import javax.persistence.Column;
-import javax.persistence.Entity;
-import javax.persistence.EnumType;
-import javax.persistence.Enumerated;
-import javax.persistence.Table;
 import java.util.UUID;
 
 import static org.thingsboard.server.dao.model.ModelConstants.RPC_ADDITIONAL_INFO;
 import static org.thingsboard.server.dao.model.ModelConstants.RPC_DEVICE_ID;
 import static org.thingsboard.server.dao.model.ModelConstants.RPC_EXPIRATION_TIME;
+import static org.thingsboard.server.dao.model.ModelConstants.RPC_ONEWAY;
 import static org.thingsboard.server.dao.model.ModelConstants.RPC_REQUEST;
+import static org.thingsboard.server.dao.model.ModelConstants.RPC_REQUEST_ID;
 import static org.thingsboard.server.dao.model.ModelConstants.RPC_RESPONSE;
 import static org.thingsboard.server.dao.model.ModelConstants.RPC_STATUS;
 import static org.thingsboard.server.dao.model.ModelConstants.RPC_TABLE_NAME;
@@ -48,7 +37,6 @@ import static org.thingsboard.server.dao.model.ModelConstants.RPC_TENANT_ID_COLU
 @Data
 @EqualsAndHashCode(callSuper = true)
 @Entity
-@TypeDef(name = "json", typeClass = JsonStringType.class)
 @Table(name = RPC_TABLE_NAME)
 public class RpcEntity extends BaseSqlEntity<Rpc> implements BaseEntity<Rpc> {
 
@@ -61,11 +49,11 @@ public class RpcEntity extends BaseSqlEntity<Rpc> implements BaseEntity<Rpc> {
     @Column(name = RPC_EXPIRATION_TIME)
     private long expirationTime;
 
-    @Type(type = "json")
+    @Convert(converter = JsonConverter.class)
     @Column(name = RPC_REQUEST)
     private JsonNode request;
 
-    @Type(type = "json")
+    @Convert(converter = JsonConverter.class)
     @Column(name = RPC_RESPONSE)
     private JsonNode response;
 
@@ -73,9 +61,15 @@ public class RpcEntity extends BaseSqlEntity<Rpc> implements BaseEntity<Rpc> {
     @Column(name = RPC_STATUS)
     private RpcStatus status;
 
-    @Type(type = "json")
+    @Convert(converter = JsonConverter.class)
     @Column(name = RPC_ADDITIONAL_INFO)
     private JsonNode additionalInfo;
+
+    @Column(name = RPC_REQUEST_ID)
+    private Integer requestId;
+
+    @Column(name = RPC_ONEWAY)
+    private Boolean oneway;
 
     public RpcEntity() {
         super();
@@ -91,6 +85,8 @@ public class RpcEntity extends BaseSqlEntity<Rpc> implements BaseEntity<Rpc> {
         this.response = rpc.getResponse();
         this.status = rpc.getStatus();
         this.additionalInfo = rpc.getAdditionalInfo();
+        this.requestId = rpc.getRequestId();
+        this.oneway = rpc.getOneway();
     }
 
     @Override
@@ -104,6 +100,8 @@ public class RpcEntity extends BaseSqlEntity<Rpc> implements BaseEntity<Rpc> {
         rpc.setResponse(response);
         rpc.setStatus(status);
         rpc.setAdditionalInfo(additionalInfo);
+        rpc.setRequestId(requestId);
+        rpc.setOneway(oneway);
         return rpc;
     }
 }

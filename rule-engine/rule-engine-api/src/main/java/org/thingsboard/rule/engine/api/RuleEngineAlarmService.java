@@ -1,27 +1,18 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
+// SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
 package org.thingsboard.rule.engine.api;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.google.common.util.concurrent.FluentFuture;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import org.thingsboard.server.common.data.EntitySubtype;
+import org.thingsboard.server.common.data.EntityType;
 import org.thingsboard.server.common.data.alarm.Alarm;
 import org.thingsboard.server.common.data.alarm.AlarmApiCallResult;
 import org.thingsboard.server.common.data.alarm.AlarmCreateOrUpdateActiveRequest;
+import org.thingsboard.server.common.data.alarm.AlarmFilter;
 import org.thingsboard.server.common.data.alarm.AlarmInfo;
 import org.thingsboard.server.common.data.alarm.AlarmQuery;
 import org.thingsboard.server.common.data.alarm.AlarmQueryV2;
@@ -36,15 +27,14 @@ import org.thingsboard.server.common.data.id.TenantId;
 import org.thingsboard.server.common.data.id.UserId;
 import org.thingsboard.server.common.data.page.PageData;
 import org.thingsboard.server.common.data.page.PageLink;
+import org.thingsboard.server.common.data.permission.MergedUserPermissions;
 import org.thingsboard.server.common.data.query.AlarmData;
 import org.thingsboard.server.common.data.query.AlarmDataQuery;
-import org.thingsboard.server.dao.alarm.AlarmOperationResult;
 
 import java.util.Collection;
+import java.util.List;
+import java.util.Set;
 
-/**
- * Created by ashvayka on 02.04.18.
- */
 public interface RuleEngineAlarmService {
 
     /*
@@ -62,31 +52,27 @@ public interface RuleEngineAlarmService {
      */
     AlarmApiCallResult updateAlarm(AlarmUpdateRequest request);
 
-    AlarmApiCallResult acknowledgeAlarm(TenantId tenantId, AlarmId alarmId, long ackTs);
-
-    AlarmApiCallResult clearAlarm(TenantId tenantId, AlarmId alarmId, long clearTs, JsonNode details);
-
-    AlarmApiCallResult assignAlarm(TenantId tenantId, AlarmId alarmId, UserId assigneeId, long assignTs);
-
-    AlarmApiCallResult unassignAlarm(TenantId tenantId, AlarmId alarmId, long assignTs);
-
     /*
-     *  Legacy API, before 3.5.
+     * Since 4.3.1.4, acknowledgeAlarm/clearAlarm/assignAlarm/unassignAlarm/deleteAlarm require the alarm originator: the
+     * alarm table is sharded by originator, and the originator routes each operation to the single owning shard. The
+     * old by-id forms were removed on purpose -- an intentional source-compatibility break for custom rule nodes
+     * (by-id lookups fan out across every shard, which is exactly what the sharding eliminated). The alarm, and thus
+     * its originator, is almost always in hand at the call site; if it truly is not, resolve it via findAlarmById
+     * first.
      */
-    @Deprecated(since = "3.5", forRemoval = true)
-    Alarm createOrUpdateAlarm(Alarm alarm);
 
-    @Deprecated(since = "3.5", forRemoval = true)
-    ListenableFuture<Boolean> ackAlarm(TenantId tenantId, AlarmId alarmId, long ackTs);
+    AlarmApiCallResult acknowledgeAlarm(TenantId tenantId, EntityId originator, AlarmId alarmId, long ackTs);
 
-    @Deprecated(since = "3.5", forRemoval = true)
-    ListenableFuture<Boolean> clearAlarm(TenantId tenantId, AlarmId alarmId, JsonNode details, long clearTs);
+    AlarmApiCallResult clearAlarm(TenantId tenantId, EntityId originator, AlarmId alarmId, long clearTs, JsonNode details);
 
-    @Deprecated(since = "3.5", forRemoval = true)
-    ListenableFuture<AlarmOperationResult> clearAlarmForResult(TenantId tenantId, AlarmId alarmId, JsonNode details, long clearTs);
+    AlarmApiCallResult clearAlarm(TenantId tenantId, EntityId originator, AlarmId alarmId, long clearTs, JsonNode details, boolean pushEvent);
+
+    AlarmApiCallResult assignAlarm(TenantId tenantId, EntityId originator, AlarmId alarmId, UserId assigneeId, long assignTs);
+
+    AlarmApiCallResult unassignAlarm(TenantId tenantId, EntityId originator, AlarmId alarmId, long assignTs);
 
     // Other API
-    Boolean deleteAlarm(TenantId tenantId, AlarmId alarmId);
+    boolean deleteAlarm(TenantId tenantId, EntityId originator, AlarmId alarmId);
 
     ListenableFuture<Alarm> findAlarmByIdAsync(TenantId tenantId, AlarmId alarmId);
 
@@ -94,7 +80,9 @@ public interface RuleEngineAlarmService {
 
     Alarm findLatestActiveByOriginatorAndType(TenantId tenantId, EntityId originator, String type);
 
-    ListenableFuture<Alarm> findLatestByOriginatorAndType(TenantId tenantId, EntityId originator, String type);
+    FluentFuture<Alarm> findLatestActiveByOriginatorAndTypeAsync(TenantId tenantId, EntityId originator, String type);
+
+    Alarm findLatestByOriginatorAndType(TenantId tenantId, EntityId originator, String type);
 
     AlarmInfo findAlarmInfoById(TenantId tenantId, AlarmId alarmId);
 
@@ -102,17 +90,24 @@ public interface RuleEngineAlarmService {
         return Futures.immediateFuture(findAlarmInfoById(tenantId, alarmId));
     }
 
-    ListenableFuture<PageData<AlarmInfo>> findAlarms(TenantId tenantId, AlarmQuery query);
+    PageData<AlarmInfo> findAlarms(TenantId tenantId, AlarmQuery query);
 
-    ListenableFuture<PageData<AlarmInfo>> findCustomerAlarms(TenantId tenantId, CustomerId customerId, AlarmQuery query);
+    PageData<AlarmInfo> findCustomerAlarms(TenantId tenantId, CustomerId customerId, AlarmQuery query);
 
-    ListenableFuture<PageData<AlarmInfo>> findAlarmsV2(TenantId tenantId, AlarmQueryV2 query);
+    PageData<AlarmInfo> findAlarmsV2(TenantId tenantId, AlarmQueryV2 query);
 
-    ListenableFuture<PageData<AlarmInfo>> findCustomerAlarmsV2(TenantId tenantId, CustomerId customerId, AlarmQueryV2 query);
+    PageData<AlarmInfo> findCustomerAlarmsV2(TenantId tenantId, CustomerId customerId, AlarmQueryV2 query);
 
     AlarmSeverity findHighestAlarmSeverity(TenantId tenantId, EntityId entityId, AlarmSearchStatus alarmSearchStatus, AlarmStatus alarmStatus, String assigneeId);
 
-    PageData<AlarmData> findAlarmDataByQueryForEntities(TenantId tenantId, AlarmDataQuery query, Collection<EntityId> orderedEntityIds);
+    PageData<AlarmData> findAlarmDataByQueryForEntities(TenantId tenantId, MergedUserPermissions mergedUserPermissions, AlarmDataQuery query, Collection<EntityId> orderedEntityIds);
+
+    List<Long> findAlarmCounts(TenantId tenantId, AlarmQuery query, List<AlarmFilter> filters);
+
+    Set<EntityId> getPropagationEntityIds(Alarm alarm);
+
+    Set<EntityId> getPropagationEntityIds(Alarm alarm, List<EntityType> types);
 
     PageData<EntitySubtype> findAlarmTypesByTenantId(TenantId tenantId, PageLink pageLink);
+
 }

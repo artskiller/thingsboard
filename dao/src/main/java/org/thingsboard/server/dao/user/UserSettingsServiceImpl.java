@@ -1,18 +1,6 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
+// SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
 package org.thingsboard.server.dao.user;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -30,8 +18,8 @@ import org.thingsboard.server.common.data.settings.UserSettings;
 import org.thingsboard.server.common.data.settings.UserSettingsCompositeKey;
 import org.thingsboard.server.common.data.settings.UserSettingsType;
 import org.thingsboard.server.dao.entity.AbstractCachedService;
-import org.thingsboard.server.dao.exception.DataValidationException;
 import org.thingsboard.server.dao.service.ConstraintValidator;
+import org.thingsboard.server.exception.DataValidationException;
 
 import java.util.Iterator;
 import java.util.List;
@@ -48,14 +36,14 @@ public class UserSettingsServiceImpl extends AbstractCachedService<UserSettingsC
     @Override
     public UserSettings saveUserSettings(TenantId tenantId, UserSettings userSettings) {
         log.trace("Executing saveUserSettings for user [{}], [{}]", userSettings.getUserId(), userSettings);
-        validateId(userSettings.getUserId(), INCORRECT_USER_ID + userSettings.getUserId());
+        validateId(userSettings.getUserId(), id -> INCORRECT_USER_ID + id);
         return doSaveUserSettings(tenantId, userSettings);
     }
 
     @Override
     public void updateUserSettings(TenantId tenantId, UserId userId, UserSettingsType type, JsonNode settings) {
         log.trace("Executing updateUserSettings for user [{}], [{}]", userId, settings);
-        validateId(userId, INCORRECT_USER_ID + userId);
+        validateId(userId, id -> INCORRECT_USER_ID + id);
 
         var key = new UserSettingsCompositeKey(userId.getId(), type.name());
         UserSettings oldSettings = userSettingsDao.findById(tenantId, key);
@@ -64,14 +52,14 @@ public class UserSettingsServiceImpl extends AbstractCachedService<UserSettingsC
         UserSettings newUserSettings = new UserSettings();
         newUserSettings.setUserId(userId);
         newUserSettings.setType(type);
-        newUserSettings.setSettings(update(oldSettingsJson, settings));
+        newUserSettings.setSettings(JacksonUtil.update(oldSettingsJson, settings));
         doSaveUserSettings(tenantId, newUserSettings);
     }
 
     @Override
     public UserSettings findUserSettings(TenantId tenantId, UserId userId, UserSettingsType type) {
         log.trace("Executing findUserSettings for user [{}]", userId);
-        validateId(userId, INCORRECT_USER_ID + userId);
+        validateId(userId, id -> INCORRECT_USER_ID + id);
 
         var key = new UserSettingsCompositeKey(userId.getId(), type.name());
         return cache.getAndPutInTransaction(key,
@@ -81,7 +69,7 @@ public class UserSettingsServiceImpl extends AbstractCachedService<UserSettingsC
     @Override
     public void deleteUserSettings(TenantId tenantId, UserId userId, UserSettingsType type, List<String> jsonPaths) {
         log.trace("Executing deleteUserSettings for user [{}]", userId);
-        validateId(userId, INCORRECT_USER_ID + userId);
+        validateId(userId, id -> INCORRECT_USER_ID + id);
         var key = new UserSettingsCompositeKey(userId.getId(), type.name());
         UserSettings userSettings = userSettingsDao.findById(tenantId, key);
         if (userSettings == null) {
@@ -127,28 +115,6 @@ public class UserSettingsServiceImpl extends AbstractCachedService<UserSettingsC
                 throw new DataValidationException("Json field name should not contain \".\" or \",\" symbols");
             }
         }
-    }
-
-    public JsonNode update(JsonNode mainNode, JsonNode updateNode) {
-        Iterator<String> fieldNames = updateNode.fieldNames();
-        while (fieldNames.hasNext()) {
-            String fieldExpression = fieldNames.next();
-            String[] fieldPath = fieldExpression.trim().split("\\.");
-            var node = (ObjectNode) mainNode;
-            for (int i = 0; i < fieldPath.length; i++) {
-                var fieldName = fieldPath[i];
-                var last = i == (fieldPath.length - 1);
-                if (last) {
-                    node.set(fieldName, updateNode.get(fieldExpression));
-                } else {
-                    if (!node.has(fieldName)) {
-                        node.set(fieldName, JacksonUtil.newObjectNode());
-                    }
-                    node = (ObjectNode) node.get(fieldName);
-                }
-            }
-        }
-        return mainNode;
     }
 
 }

@@ -1,23 +1,10 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-License-Identifier: Apache-2.0
 package org.thingsboard.rule.engine.profile;
 
 import lombok.extern.slf4j.Slf4j;
 import org.thingsboard.rule.engine.api.TbContext;
-import org.thingsboard.server.common.data.DataConstants;
+import org.thingsboard.server.common.data.AttributeScope;
 import org.thingsboard.server.common.data.Device;
 import org.thingsboard.server.common.data.id.CustomerId;
 import org.thingsboard.server.common.data.id.DeviceId;
@@ -29,6 +16,7 @@ import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 
 @Slf4j
+@Deprecated
 public class DynamicPredicateValueCtxImpl implements DynamicPredicateValueCtx {
     private final TenantId tenantId;
     private CustomerId customerId;
@@ -62,7 +50,7 @@ public class DynamicPredicateValueCtxImpl implements DynamicPredicateValueCtx {
 
     private EntityKeyValue getValue(EntityId entityId, String key) {
         try {
-            Optional<AttributeKvEntry> entry = ctx.getAttributesService().find(tenantId, entityId, DataConstants.SERVER_SCOPE, key).get();
+            Optional<AttributeKvEntry> entry = ctx.getAttributesService().find(tenantId, entityId, AttributeScope.SERVER_SCOPE, key).get();
             if (entry.isPresent()) {
                 return DeviceState.toEntityValue(entry.get());
             }

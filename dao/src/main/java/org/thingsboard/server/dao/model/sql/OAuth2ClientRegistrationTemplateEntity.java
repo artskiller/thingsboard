@@ -1,25 +1,17 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
+// SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
 package org.thingsboard.server.dao.model.sql;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.Table;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
-import org.hibernate.annotations.Type;
-import org.hibernate.annotations.TypeDef;
 import org.thingsboard.server.common.data.id.OAuth2ClientRegistrationTemplateId;
 import org.thingsboard.server.common.data.oauth2.MapperType;
 import org.thingsboard.server.common.data.oauth2.OAuth2BasicMapperConfig;
@@ -28,19 +20,14 @@ import org.thingsboard.server.common.data.oauth2.OAuth2MapperConfig;
 import org.thingsboard.server.common.data.oauth2.TenantNameStrategyType;
 import org.thingsboard.server.dao.model.BaseSqlEntity;
 import org.thingsboard.server.dao.model.ModelConstants;
-import org.thingsboard.server.dao.util.mapping.JsonStringType;
+import org.thingsboard.server.dao.util.mapping.JsonConverter;
 
-import javax.persistence.Column;
-import javax.persistence.Entity;
-import javax.persistence.EnumType;
-import javax.persistence.Enumerated;
-import javax.persistence.Table;
 import java.util.Arrays;
+import java.util.Collections;
 
 @Data
 @EqualsAndHashCode(callSuper = true)
 @Entity
-@TypeDef(name = "json", typeClass = JsonStringType.class)
 @Table(name = ModelConstants.OAUTH2_CLIENT_REGISTRATION_TEMPLATE_TABLE_NAME)
 public class OAuth2ClientRegistrationTemplateEntity extends BaseSqlEntity<OAuth2ClientRegistrationTemplate> {
 
@@ -80,6 +67,10 @@ public class OAuth2ClientRegistrationTemplateEntity extends BaseSqlEntity<OAuth2
     private String defaultDashboardName;
     @Column(name = ModelConstants.OAUTH2_ALWAYS_FULL_SCREEN_PROPERTY)
     private Boolean alwaysFullScreen;
+    @Column(name = ModelConstants.OAUTH2_PARENT_CUSTOMER_NAME_PATTERN_PROPERTY)
+    private String parentCustomerNamePattern;
+    @Column(name = ModelConstants.OAUTH2_USER_GROUPS_NAME_PATTERN_PROPERTY)
+    private String userGroupsNamePattern;
     @Column(name = ModelConstants.OAUTH2_TEMPLATE_COMMENT_PROPERTY)
     private String comment;
     @Column(name = ModelConstants.OAUTH2_TEMPLATE_LOGIN_BUTTON_ICON_PROPERTY)
@@ -89,7 +80,7 @@ public class OAuth2ClientRegistrationTemplateEntity extends BaseSqlEntity<OAuth2
     @Column(name = ModelConstants.OAUTH2_TEMPLATE_HELP_LINK_PROPERTY)
     private String helpLink;
 
-    @Type(type = "json")
+    @Convert(converter = JsonConverter.class)
     @Column(name = ModelConstants.OAUTH2_TEMPLATE_ADDITIONAL_INFO_PROPERTY)
     private JsonNode additionalInfo;
 
@@ -115,7 +106,7 @@ public class OAuth2ClientRegistrationTemplateEntity extends BaseSqlEntity<OAuth2
         this.helpLink = clientRegistrationTemplate.getHelpLink();
         this.additionalInfo = clientRegistrationTemplate.getAdditionalInfo();
         OAuth2MapperConfig mapperConfig = clientRegistrationTemplate.getMapperConfig();
-        if (mapperConfig != null){
+        if (mapperConfig != null) {
             this.type = mapperConfig.getType();
             OAuth2BasicMapperConfig basicConfig = mapperConfig.getBasic();
             if (basicConfig != null) {
@@ -127,6 +118,11 @@ public class OAuth2ClientRegistrationTemplateEntity extends BaseSqlEntity<OAuth2
                 this.customerNamePattern = basicConfig.getCustomerNamePattern();
                 this.defaultDashboardName = basicConfig.getDefaultDashboardName();
                 this.alwaysFullScreen = basicConfig.isAlwaysFullScreen();
+                this.parentCustomerNamePattern = basicConfig.getParentCustomerNamePattern();
+                if (basicConfig.getUserGroupsNamePattern() != null && !basicConfig.getUserGroupsNamePattern().isEmpty()) {
+                    this.userGroupsNamePattern = basicConfig.getUserGroupsNamePattern().stream()
+                            .reduce((result, element) -> result + "," + element).orElse(null);
+                }
             }
         }
     }
@@ -151,6 +147,8 @@ public class OAuth2ClientRegistrationTemplateEntity extends BaseSqlEntity<OAuth2
                                 .customerNamePattern(customerNamePattern)
                                 .defaultDashboardName(defaultDashboardName)
                                 .alwaysFullScreen(alwaysFullScreen)
+                                .parentCustomerNamePattern(parentCustomerNamePattern)
+                                .userGroupsNamePattern(userGroupsNamePattern != null ? Arrays.asList(userGroupsNamePattern.split(",")) : Collections.emptyList())
                                 .build()
                         )
                         .build()

@@ -1,19 +1,5 @@
-///
-/// Copyright © 2016-2023 The Thingsboard Authors
-///
-/// Licensed under the Apache License, Version 2.0 (the "License");
-/// you may not use this file except in compliance with the License.
-/// You may obtain a copy of the License at
-///
-///     http://www.apache.org/licenses/LICENSE-2.0
-///
-/// Unless required by applicable law or agreed to in writing, software
-/// distributed under the License is distributed on an "AS IS" BASIS,
-/// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-/// See the License for the specific language governing permissions and
-/// limitations under the License.
-///
-
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-License-Identifier: Apache-2.0
 import { ValidatorFn, Validators } from '@angular/forms';
 import { Lwm2mSecurityType } from '@shared/models/lwm2m-security-config.models';
 
@@ -25,7 +11,7 @@ export const ATTRIBUTE = 'attribute';
 export const TELEMETRY = 'telemetry';
 export const KEY_NAME = 'keyName';
 export const DEFAULT_ID_SERVER = 123;
-export const DEFAULT_ID_BOOTSTRAP = 111;
+export const DEFAULT_ID_BOOTSTRAP = 0;
 export const DEFAULT_LOCAL_HOST_NAME = 'localhost';
 export const DEFAULT_PORT_SERVER_NO_SEC = 5685;
 export const DEFAULT_PORT_BOOTSTRAP_NO_SEC = 5687;
@@ -122,6 +108,55 @@ export const PowerModeTranslationMap = new Map<PowerMode, string>(
   ]
 );
 
+export enum ObjectIDVer {
+  V1_0 = '1.0',
+  V1_1 = '1.1',
+  V1_2 = '1.2',
+}
+
+export const ObjectIDVerTranslationMap = new Map<ObjectIDVer, string>(
+  [
+    [ObjectIDVer.V1_0, 'device-profile.lwm2m.default-object-id-ver.v1-0'],
+    [ObjectIDVer.V1_1, 'device-profile.lwm2m.default-object-id-ver.v1-1'],
+    [ObjectIDVer.V1_2, 'device-profile.lwm2m.default-object-id-ver.v1-2'],
+  ]
+);
+
+export interface ObserveStrategyData {
+  name: string;
+  description: string;
+}
+
+export enum ObserveStrategy {
+  SINGLE = 'SINGLE',
+  COMPOSITE_ALL = 'COMPOSITE_ALL',
+  COMPOSITE_BY_OBJECT = 'COMPOSITE_BY_OBJECT'
+}
+
+export const ObserveStrategyMap = new Map<ObserveStrategy, ObserveStrategyData>([
+  [
+    ObserveStrategy.SINGLE,
+    {
+      name: 'device-profile.lwm2m.observe-strategy.single',
+      description: 'device-profile.lwm2m.observe-strategy.single-description'
+    }
+  ],
+  [
+    ObserveStrategy.COMPOSITE_ALL,
+    {
+      name: 'device-profile.lwm2m.observe-strategy.composite-all',
+      description: 'device-profile.lwm2m.observe-strategy.composite-all-description'
+    }
+  ],
+  [
+    ObserveStrategy.COMPOSITE_BY_OBJECT,
+    {
+      name: 'device-profile.lwm2m.observe-strategy.composite-by-object',
+      description: 'device-profile.lwm2m.observe-strategy.composite-by-object-description'
+    }
+  ]
+]);
+
 export interface ServerSecurityConfig {
   host?: string;
   port?: number;
@@ -155,6 +190,7 @@ export interface Lwm2mProfileConfigModels {
 
 export interface ClientLwM2mSettings {
   clientOnlyObserveAfterConnect: number;
+  useObject19ForOtaInfo?: boolean;
   fwUpdateStrategy: number;
   swUpdateStrategy: number;
   fwUpdateResource?: string;
@@ -163,7 +199,7 @@ export interface ClientLwM2mSettings {
   edrxCycle?: number;
   pagingTransmissionWindow?: number;
   psmActivityTimer?: number;
-  compositeOperationsSupport: boolean;
+  defaultObjectIDVer: ObjectIDVer;
 }
 
 export interface ObservableAttributes {
@@ -172,6 +208,8 @@ export interface ObservableAttributes {
   telemetry: string[];
   keyName: {};
   attributeLwm2m: AttributesNameValueMap;
+  observeStrategy: ObserveStrategy;
+  initAttrTelAsObsStrategy?: boolean;
 }
 
 export function getDefaultProfileObserveAttrConfig(): ObservableAttributes {
@@ -180,7 +218,8 @@ export function getDefaultProfileObserveAttrConfig(): ObservableAttributes {
     attribute: [],
     telemetry: [],
     keyName: {},
-    attributeLwm2m: {}
+    attributeLwm2m: {},
+    observeStrategy: ObserveStrategy.SINGLE
   };
 }
 
@@ -190,7 +229,7 @@ export function getDefaultProfileClientLwM2mSettingsConfig(): ClientLwM2mSetting
     fwUpdateStrategy: 1,
     swUpdateStrategy: 1,
     powerMode: PowerMode.DRX,
-    compositeOperationsSupport: false
+    defaultObjectIDVer: ObjectIDVer.V1_0
   };
 }
 

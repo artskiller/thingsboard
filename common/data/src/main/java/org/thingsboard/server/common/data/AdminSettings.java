@@ -1,29 +1,15 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-License-Identifier: Apache-2.0
 package org.thingsboard.server.common.data;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import io.swagger.annotations.ApiModel;
-import io.swagger.annotations.ApiModelProperty;
+import io.swagger.v3.oas.annotations.media.Schema;
 import org.thingsboard.server.common.data.id.AdminSettingsId;
 import org.thingsboard.server.common.data.id.TenantId;
 import org.thingsboard.server.common.data.validation.Length;
 import org.thingsboard.server.common.data.validation.NoXss;
 
-@ApiModel
+@Schema
 public class AdminSettings extends BaseData<AdminSettingsId> implements HasTenantId {
 
     private static final long serialVersionUID = -7670322981725511892L;
@@ -33,8 +19,8 @@ public class AdminSettings extends BaseData<AdminSettingsId> implements HasTenan
     @NoXss
     @Length(fieldName = "key")
     private String key;
-    private transient JsonNode jsonValue;
-    
+    private JsonNode jsonValue;
+
     public AdminSettings() {
         super();
     }
@@ -42,7 +28,7 @@ public class AdminSettings extends BaseData<AdminSettingsId> implements HasTenan
     public AdminSettings(AdminSettingsId id) {
         super(id);
     }
-    
+
     public AdminSettings(AdminSettings adminSettings) {
         super(adminSettings);
         this.tenantId = adminSettings.getTenantId();
@@ -50,19 +36,19 @@ public class AdminSettings extends BaseData<AdminSettingsId> implements HasTenan
         this.jsonValue = adminSettings.getJsonValue();
     }
 
-    @ApiModelProperty(position = 1, value = "The Id of the Administration Settings, auto-generated, UUID")
+    @Schema(description = "The Id of the Administration Settings, auto-generated, UUID")
     @Override
     public AdminSettingsId getId() {
         return super.getId();
     }
 
-    @ApiModelProperty(position = 2, value = "Timestamp of the settings creation, in milliseconds", example = "1609459200000", accessMode = ApiModelProperty.AccessMode.READ_ONLY)
+    @Schema(description = "Timestamp of the settings creation, in milliseconds", example = "1609459200000", accessMode = Schema.AccessMode.READ_ONLY)
     @Override
     public long getCreatedTime() {
         return super.getCreatedTime();
     }
 
-    @ApiModelProperty(position = 3, value = "JSON object with Tenant Id.", accessMode = ApiModelProperty.AccessMode.READ_ONLY)
+    @Schema(description = "JSON object with Tenant Id.", accessMode = Schema.AccessMode.READ_ONLY)
     public TenantId getTenantId() {
         return tenantId;
     }
@@ -71,7 +57,7 @@ public class AdminSettings extends BaseData<AdminSettingsId> implements HasTenan
         this.tenantId = tenantId;
     }
 
-    @ApiModelProperty(position = 4, value = "The Administration Settings key, (e.g. 'general' or 'mail')", example = "mail")
+    @Schema(description = "The Administration Settings key, (e.g. 'general' or 'mail')", example = "mail")
     public String getKey() {
         return key;
     }
@@ -80,7 +66,7 @@ public class AdminSettings extends BaseData<AdminSettingsId> implements HasTenan
         this.key = key;
     }
 
-    @ApiModelProperty(position = 5, value = "JSON representation of the Administration Settings value")
+    @Schema(description = "JSON representation of the Administration Settings value")
     public JsonNode getJsonValue() {
         return jsonValue;
     }

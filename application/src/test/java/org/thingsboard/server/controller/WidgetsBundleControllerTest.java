@@ -1,18 +1,6 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
+// SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
 package org.thingsboard.server.controller;
 
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -29,12 +17,17 @@ import org.thingsboard.server.common.data.page.PageData;
 import org.thingsboard.server.common.data.page.PageLink;
 import org.thingsboard.server.common.data.security.Authority;
 import org.thingsboard.server.common.data.widget.WidgetsBundle;
-import org.thingsboard.server.dao.exception.DataValidationException;
 import org.thingsboard.server.dao.service.DaoSqlTest;
+import org.thingsboard.server.exception.DataValidationException;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -53,7 +46,7 @@ public class WidgetsBundleControllerTest extends AbstractControllerTest {
 
         Tenant tenant = new Tenant();
         tenant.setTitle("My tenant");
-        savedTenant = doPost("/api/tenant", tenant, Tenant.class);
+        savedTenant = saveTenant(tenant);
         Assert.assertNotNull(savedTenant);
 
         tenantAdmin = new User();
@@ -70,8 +63,7 @@ public class WidgetsBundleControllerTest extends AbstractControllerTest {
     public void afterTest() throws Exception {
         loginSysAdmin();
 
-        doDelete("/api/tenant/" + savedTenant.getId().getId().toString())
-                .andExpect(status().isOk());
+        deleteTenant(savedTenant.getId());
     }
 
     @Test
@@ -83,8 +75,8 @@ public class WidgetsBundleControllerTest extends AbstractControllerTest {
 
         WidgetsBundle savedWidgetsBundle = doPost("/api/widgetsBundle", widgetsBundle, WidgetsBundle.class);
 
-        testNotifyEntityAllOneTime(savedWidgetsBundle, savedWidgetsBundle.getId(), savedWidgetsBundle.getId(), savedTenant.getId(),
-                tenantAdmin.getCustomerId(), tenantAdmin.getId(), tenantAdmin.getEmail(), ActionType.ADDED);
+        testNotifyEntityAllOneTimeLogEntityActionEntityEqClass(savedWidgetsBundle, savedWidgetsBundle.getId(), savedWidgetsBundle.getId(), savedTenant.getId(),
+                tenantAdmin.getCustomerId(), tenantAdmin.getId(), tenantAdmin.getEmail(), ActionType.ADDED, ActionType.ADDED);
 
         Mockito.reset(tbClusterService, auditLogService);
 
@@ -96,13 +88,13 @@ public class WidgetsBundleControllerTest extends AbstractControllerTest {
         Assert.assertEquals(widgetsBundle.getTitle(), savedWidgetsBundle.getTitle());
 
         savedWidgetsBundle.setTitle("My new widgets bundle");
-        doPost("/api/widgetsBundle", savedWidgetsBundle, WidgetsBundle.class);
+        savedWidgetsBundle = doPost("/api/widgetsBundle", savedWidgetsBundle, WidgetsBundle.class);
 
         WidgetsBundle foundWidgetsBundle = doGet("/api/widgetsBundle/" + savedWidgetsBundle.getId().getId().toString(), WidgetsBundle.class);
         Assert.assertEquals(foundWidgetsBundle.getTitle(), savedWidgetsBundle.getTitle());
 
-        testNotifyEntityAllOneTime(savedWidgetsBundle, savedWidgetsBundle.getId(), savedWidgetsBundle.getId(), savedTenant.getId(),
-                tenantAdmin.getCustomerId(), tenantAdmin.getId(), tenantAdmin.getEmail(), ActionType.UPDATED);
+        testNotifyEntityAllOneTimeLogEntityActionEntityEqClass(savedWidgetsBundle, savedWidgetsBundle.getId(), savedWidgetsBundle.getId(), savedTenant.getId(),
+                tenantAdmin.getCustomerId(), tenantAdmin.getId(), tenantAdmin.getEmail(), ActionType.UPDATED, ActionType.UPDATED);
     }
 
     @Test
@@ -134,7 +126,7 @@ public class WidgetsBundleControllerTest extends AbstractControllerTest {
 
         doPost("/api/widgetsBundle", savedWidgetsBundle)
                 .andExpect(status().isForbidden())
-                .andExpect(statusReason(containsString(msgErrorPermission)));
+                .andExpect(statusReason(containsString(msgErrorPermissionWrite + "WIDGETS_BUNDLE" + " '" + widgetsBundle.getTitle() + "'!")));
 
         testNotifyEntityNever(savedWidgetsBundle.getId(), savedWidgetsBundle);
 
@@ -152,6 +144,37 @@ public class WidgetsBundleControllerTest extends AbstractControllerTest {
     }
 
     @Test
+    public void testFindWidgetsBundlesByIds() throws Exception {
+        List<WidgetsBundle> savedWidgetsBundles = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            WidgetsBundle widgetsBundle = new WidgetsBundle();
+            widgetsBundle.setTitle("My widgets bundle " + i);
+            savedWidgetsBundles.add(doPost("/api/widgetsBundle", widgetsBundle, WidgetsBundle.class));
+        }
+
+        String idsParam = savedWidgetsBundles.stream()
+                .map(wb -> wb.getId().getId().toString())
+                .collect(Collectors.joining(","));
+
+        WidgetsBundle[] foundWidgetsBundles =
+                doGet("/api/widgetsBundles?widgetsBundleIds=" + idsParam, WidgetsBundle[].class);
+
+        Assert.assertNotNull(foundWidgetsBundles);
+        Assert.assertEquals(savedWidgetsBundles.size(), foundWidgetsBundles.length);
+
+        Map<UUID, WidgetsBundle> foundById = Arrays.stream(foundWidgetsBundles)
+                .collect(Collectors.toMap(wb -> wb.getId().getId(), Function.identity()));
+
+        for (WidgetsBundle savedWidgetsBundle : savedWidgetsBundles) {
+            UUID id = savedWidgetsBundle.getId().getId();
+            WidgetsBundle foundWidgetsBundle = foundById.get(id);
+            Assert.assertNotNull("WidgetsBundle not found for id " + id, foundWidgetsBundle);
+            Assert.assertEquals(savedWidgetsBundle, foundWidgetsBundle);
+        }
+    }
+
+
+    @Test
     public void testDeleteWidgetsBundle() throws Exception {
         WidgetsBundle widgetsBundle = new WidgetsBundle();
         widgetsBundle.setTitle("My widgets bundle");
@@ -165,8 +188,8 @@ public class WidgetsBundleControllerTest extends AbstractControllerTest {
 
         String savedWidgetsBundleIdStr = savedWidgetsBundle.getId().getId().toString();
 
-        testNotifyEntityAllOneTime(savedWidgetsBundle, savedWidgetsBundle.getId(), savedWidgetsBundle.getId(), savedTenant.getId(),
-                tenantAdmin.getCustomerId(), tenantAdmin.getId(), tenantAdmin.getEmail(), ActionType.DELETED);
+        testNotifyEntityAllOneTimeLogEntityActionEntityEqClass(savedWidgetsBundle, savedWidgetsBundle.getId(), savedWidgetsBundle.getId(), savedTenant.getId(),
+                tenantAdmin.getCustomerId(), tenantAdmin.getId(), tenantAdmin.getEmail(), ActionType.DELETED, ActionType.DELETED);
 
         doGet("/api/widgetsBundle/" + savedWidgetsBundleIdStr)
                 .andExpect(status().isNotFound())
@@ -206,22 +229,32 @@ public class WidgetsBundleControllerTest extends AbstractControllerTest {
 
     @Test
     public void testFindTenantWidgetsBundlesByPageLink() throws Exception {
+        loginSysAdmin();
 
-        login(tenantAdmin.getEmail(), "testPassword1");
+        //upload some system bundles
+        int sysCntEntity = 10;
+        for (int i = 0; i < sysCntEntity; i++) {
+            WidgetsBundle widgetsBundle = new WidgetsBundle();
+            widgetsBundle.setTitle("Widgets bundle" + i);
+            doPost("/api/widgetsBundle", widgetsBundle, WidgetsBundle.class);
+        }
 
         List<WidgetsBundle> sysWidgetsBundles = doGetTyped("/api/widgetsBundles?",
                 new TypeReference<>() {
                 });
 
+        login(tenantAdmin.getEmail(), "testPassword1");
+
         int cntEntity = 73;
-        List<WidgetsBundle> widgetsBundles = new ArrayList<>();
+        List<WidgetsBundle> tenantWidgetsBundles = new ArrayList<>();
         for (int i = 0; i < cntEntity; i++) {
             WidgetsBundle widgetsBundle = new WidgetsBundle();
             widgetsBundle.setTitle("Widgets bundle" + i);
-            widgetsBundles.add(doPost("/api/widgetsBundle", widgetsBundle, WidgetsBundle.class));
+            tenantWidgetsBundles.add(doPost("/api/widgetsBundle", widgetsBundle, WidgetsBundle.class));
         }
 
-        widgetsBundles.addAll(sysWidgetsBundles);
+        List<WidgetsBundle> allWidgetsBundles = new ArrayList<>(tenantWidgetsBundles);
+        allWidgetsBundles.addAll(sysWidgetsBundles);
 
         List<WidgetsBundle> loadedWidgetsBundles = new ArrayList<>();
         PageLink pageLink = new PageLink(14);
@@ -236,10 +269,35 @@ public class WidgetsBundleControllerTest extends AbstractControllerTest {
             }
         } while (pageData.hasNext());
 
-        Collections.sort(widgetsBundles, idComparator);
+        Collections.sort(allWidgetsBundles, idComparator);
         Collections.sort(loadedWidgetsBundles, idComparator);
 
-        Assert.assertEquals(widgetsBundles, loadedWidgetsBundles);
+        Assert.assertEquals(allWidgetsBundles, loadedWidgetsBundles);
+
+        //retrieve tenant only bundles
+        List<WidgetsBundle> loadedWidgetsBundles2 = new ArrayList<>();
+        PageLink pageLink2 = new PageLink(14);
+        do {
+            pageData = doGetTypedWithPageLink("/api/widgetsBundles?tenantOnly=true&",
+                    new TypeReference<>() {
+                    }, pageLink2);
+            loadedWidgetsBundles2.addAll(pageData.getData());
+            if (pageData.hasNext()) {
+                pageLink2 = pageLink2.nextPageLink();
+            }
+        } while (pageData.hasNext());
+
+        Collections.sort(tenantWidgetsBundles, idComparator);
+        Collections.sort(loadedWidgetsBundles2, idComparator);
+
+        Assert.assertEquals(tenantWidgetsBundles, loadedWidgetsBundles2);
+
+        // cleanup
+        loginSysAdmin();
+        for (WidgetsBundle sysWidgetsBundle : sysWidgetsBundles) {
+            doDelete("/api/widgetsBundle/" + sysWidgetsBundle.getId().getId().toString())
+                    .andExpect(status().isOk());
+        }
     }
 
     @Test

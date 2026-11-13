@@ -1,24 +1,13 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
+// SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
 package org.thingsboard.server.dao.service;
 
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.ListeningExecutorService;
 import com.google.common.util.concurrent.MoreExecutors;
+import lombok.Getter;
 import org.junit.Assert;
 import org.junit.Ignore;
 import org.junit.Test;
@@ -29,18 +18,24 @@ import org.thingsboard.server.common.data.Device;
 import org.thingsboard.server.common.data.DeviceProfile;
 import org.thingsboard.server.common.data.DeviceProfileInfo;
 import org.thingsboard.server.common.data.DeviceTransportType;
+import org.thingsboard.server.common.data.EntityInfo;
 import org.thingsboard.server.common.data.OtaPackage;
+import org.thingsboard.server.common.data.group.EntityGroup;
 import org.thingsboard.server.common.data.ota.ChecksumAlgorithm;
+import org.thingsboard.server.common.data.ota.DeviceGroupOtaPackage;
 import org.thingsboard.server.common.data.page.PageData;
 import org.thingsboard.server.common.data.page.PageLink;
 import org.thingsboard.server.dao.device.DeviceProfileService;
 import org.thingsboard.server.dao.device.DeviceService;
-import org.thingsboard.server.dao.exception.DataValidationException;
+import org.thingsboard.server.dao.group.EntityGroupService;
+import org.thingsboard.server.dao.ota.DeviceGroupOtaPackageService;
 import org.thingsboard.server.dao.ota.OtaPackageService;
+import org.thingsboard.server.exception.DataValidationException;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
@@ -53,9 +48,15 @@ import static org.thingsboard.server.common.data.ota.OtaPackageType.FIRMWARE;
 public class DeviceProfileServiceTest extends AbstractServiceTest {
 
     @Autowired
+    DeviceGroupOtaPackageService deviceGroupOtaPackageService;
+    @Autowired
     DeviceProfileService deviceProfileService;
+    @Getter
     @Autowired
     DeviceService deviceService;
+    @Getter
+    @Autowired
+    EntityGroupService entityGroupService;
     @Autowired
     OtaPackageService otaPackageService;
 
@@ -207,6 +208,18 @@ public class DeviceProfileServiceTest extends AbstractServiceTest {
         });
     }
 
+    @Test
+    public void testSaveDeviceProfileWithNameDefaultAndProfileWithIsDefaultAndDifferentNameAlreadyExists() {
+        DeviceProfile defaultDeviceProfile = deviceProfileService.findDefaultDeviceProfile(tenantId);
+        Assert.assertNotNull(defaultDeviceProfile);
+        defaultDeviceProfile.setName("Device Profile 1");
+        deviceProfileService.saveDeviceProfile(defaultDeviceProfile);
+        DeviceProfile createdDeviceProfile = deviceProfileService.findOrCreateDeviceProfile(tenantId, "default");
+        Assert.assertNotNull(createdDeviceProfile);
+        Assert.assertEquals("default", createdDeviceProfile.getName());
+        Assert.assertFalse(createdDeviceProfile.isDefault());
+    }
+
     @Ignore
     @Test
     public void testChangeDeviceProfileTypeWithExistingDevices() {
@@ -270,6 +283,37 @@ public class DeviceProfileServiceTest extends AbstractServiceTest {
 
         assertThat(deviceProfileService.findDeviceProfileById(tenantId, deviceProfile.getId())).isNull();
         assertThat(otaPackageService.findOtaPackageById(tenantId, otaPackage.getId())).isNull();
+    }
+
+    @Test
+    public void testDeleteDeviceProfileWithOta_cascadeOtaDelete_unassignedOtaFromDeviceGroup() {
+        DeviceProfile deviceProfile = this.createDeviceProfile(tenantId, "Device Profile");
+        deviceProfile = deviceProfileService.saveDeviceProfile(deviceProfile);
+
+        OtaPackage otaPackage = constructDefaultOtaPackage(tenantId, deviceProfile.getId());
+        otaPackage = otaPackageService.saveOtaPackage(otaPackage);
+        deviceProfile.setFirmwareId(otaPackage.getId());
+        deviceProfileService.saveDeviceProfile(deviceProfile);
+
+        Device device = createDevice(tenantId, "Test device", deviceProfile.getId());
+
+        EntityGroup deviceGroup = createDeviceGroup(tenantId, "Test devices");
+        entityGroupService.addEntityToEntityGroup(tenantId, deviceGroup.getId(), device.getId());
+
+        DeviceGroupOtaPackage deviceGroupOtaPackage = new DeviceGroupOtaPackage();
+        deviceGroupOtaPackage.setOtaPackageId(otaPackage.getId());
+        deviceGroupOtaPackage.setOtaPackageType(otaPackage.getType());
+        deviceGroupOtaPackage.setGroupId(deviceGroup.getId());
+        deviceGroupOtaPackageService.saveDeviceGroupOtaPackage(tenantId, deviceGroupOtaPackage);
+
+        assertThat(otaPackageService.findOtaPackageById(tenantId, otaPackage.getId())).isNotNull();
+        assertThat(deviceGroupOtaPackageService.findDeviceGroupOtaPackageByGroupIdAndType(deviceGroup.getId(), otaPackage.getType())).isNotNull();
+
+        deviceService.deleteDevice(tenantId, device.getId());
+        deviceProfileService.deleteDeviceProfile(tenantId, deviceProfile.getId());
+
+        assertThat(otaPackageService.findOtaPackageById(tenantId, otaPackage.getId())).isNull();
+        assertThat(deviceGroupOtaPackageService.findDeviceGroupOtaPackageByGroupIdAndType(deviceGroup.getId(), otaPackage.getType())).isNull();
     }
 
     @Test
@@ -370,6 +414,98 @@ public class DeviceProfileServiceTest extends AbstractServiceTest {
         pageData = deviceProfileService.findDeviceProfileInfos(tenantId, pageLink, null);
         Assert.assertFalse(pageData.hasNext());
         Assert.assertEquals(1, pageData.getTotalElements());
+    }
+
+    @Test
+    public void testFindAllDeviceProfilesByTenantId() {
+        int deviceProfilesCount = 4; // 3 created + default
+        var deviceProfiles = new ArrayList<DeviceProfile>(4);
+
+        var profileC = deviceProfileService.saveDeviceProfile(
+                createDeviceProfile(tenantId, "profile C"));
+        deviceProfiles.add(deviceProfileService.saveDeviceProfile(profileC));
+
+
+        var profileA = deviceProfileService.saveDeviceProfile(
+                    createDeviceProfile(tenantId, "profile A"));
+        deviceProfiles.add(deviceProfileService.saveDeviceProfile(profileA));
+
+
+        var profileB = deviceProfileService.saveDeviceProfile(
+                createDeviceProfile(tenantId, "profile B"));
+        deviceProfiles.add(deviceProfileService.saveDeviceProfile(profileB));
+
+
+        deviceProfiles.add(deviceProfileService.findDefaultDeviceProfile(tenantId));
+
+        List<EntityInfo> sortedProfileInfos = deviceProfiles.stream()
+                .map(profile -> new EntityInfo(profile.getId(), profile.getName()))
+                .sorted(Comparator.comparing(EntityInfo::getName))
+                .collect(Collectors.toList());
+
+        var deviceProfileInfos = deviceProfileService
+                .findDeviceProfileNamesByTenantId(tenantId, false);
+
+        assertThat(deviceProfileInfos).isNotNull();
+        assertThat(deviceProfileInfos).hasSize(deviceProfilesCount);
+        assertThat(deviceProfileInfos).isEqualTo(sortedProfileInfos);
+    }
+
+    @Test
+    public void testFindActiveOnlyDeviceProfilesByTenantId() {
+
+        String profileCName = "profile C";
+        deviceProfileService.saveDeviceProfile(
+                createDeviceProfile(tenantId, profileCName));
+
+        String profileAName = "profile A";
+        deviceProfileService.saveDeviceProfile(
+                createDeviceProfile(tenantId, profileAName));
+
+        String profileBName = "profile B";
+        deviceProfileService.saveDeviceProfile(
+                createDeviceProfile(tenantId, profileBName));
+
+
+        var deviceProfileInfos = deviceProfileService
+                .findDeviceProfileNamesByTenantId(tenantId, true);
+
+        assertThat(deviceProfileInfos).isNotNull();
+        assertThat(deviceProfileInfos).isEmpty();
+
+        var deviceC = new Device();
+        deviceC.setName("Test Device C");
+        deviceC.setType(profileCName);
+        deviceC.setTenantId(tenantId);
+
+        deviceC = deviceService.saveDevice(deviceC);
+
+        var deviceA = new Device();
+        deviceA.setName("Test Device A");
+        deviceA.setType(profileAName);
+        deviceA.setTenantId(tenantId);
+
+        deviceA = deviceService.saveDevice(deviceA);
+
+        var deviceB = new Device();
+        deviceB.setName("Test Device B");
+        deviceB.setType(profileBName);
+        deviceB.setTenantId(tenantId);
+
+        deviceB = deviceService.saveDevice(deviceB);
+
+        deviceProfileInfos = deviceProfileService
+                .findDeviceProfileNamesByTenantId(tenantId, true);
+
+        var expected = List.of(
+                new EntityInfo(deviceA.getDeviceProfileId(), profileAName),
+                new EntityInfo(deviceB.getDeviceProfileId(), profileBName),
+                new EntityInfo(deviceC.getDeviceProfileId(), profileCName)
+        );
+
+        assertThat(deviceProfileInfos).isNotEmpty();
+        assertThat(deviceProfileInfos).hasSize(3);
+        assertThat(deviceProfileInfos).isEqualTo(expected);
     }
 
 }

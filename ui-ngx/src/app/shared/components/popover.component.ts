@@ -1,26 +1,11 @@
-///
-/// Copyright © 2016-2023 The Thingsboard Authors
-///
-/// Licensed under the Apache License, Version 2.0 (the "License");
-/// you may not use this file except in compliance with the License.
-/// You may obtain a copy of the License at
-///
-///     http://www.apache.org/licenses/LICENSE-2.0
-///
-/// Unless required by applicable law or agreed to in writing, software
-/// distributed under the License is distributed on an "AS IS" BASIS,
-/// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-/// See the License for the specific language governing permissions and
-/// limitations under the License.
-///
-
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
+// SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
 import {
   AfterViewInit,
   ChangeDetectionStrategy,
   ChangeDetectorRef,
   Component,
-  ComponentFactory,
-  ComponentFactoryResolver,
   ComponentRef,
   Directive,
   ElementRef,
@@ -32,9 +17,10 @@ import {
   OnInit,
   Optional,
   Output,
-  Renderer2,
+  Renderer2, runInInjectionContext,
   SimpleChanges,
   TemplateRef,
+  Type,
   ViewChild,
   ViewContainerRef,
   ViewEncapsulation
@@ -44,32 +30,43 @@ import {
   CdkConnectedOverlay,
   CdkOverlayOrigin,
   ConnectedOverlayPositionChange,
-  ConnectionPositionPair
+  ConnectionPositionPair,
+  NoopScrollStrategy
 } from '@angular/cdk/overlay';
 import { Subject, Subscription } from 'rxjs';
 import {
+  convertStrictPopoverPlacement,
   DEFAULT_POPOVER_POSITIONS,
   getPlacementName,
+  isStrictPopoverPlacement,
   popoverMotion,
   PopoverPlacement,
-  PropertyMapping
+  PopoverPreferredPlacement,
+  PropertyMapping,
+  StrictPopoverPlacement
 } from '@shared/components/popover.models';
 import { POSITION_MAP } from '@shared/models/overlay.models';
 import { distinctUntilChanged, take, takeUntil } from 'rxjs/operators';
 import { isNotEmptyStr, onParentScrollOrWindowResize } from '@core/utils';
 import { animate, AnimationBuilder, AnimationMetadata, style } from '@angular/animations';
 import { coerceBoolean } from '@shared/decorators/coercion';
+import {
+  widgetContextToken,
+  widgetErrorMessagesToken,
+  widgetTitlePanelToken
+} from '@home/models/widget-component.models';
 
 export type TbPopoverTrigger = 'click' | 'focus' | 'hover' | null;
 
 @Directive({
-  // eslint-disable-next-line @angular-eslint/directive-selector
-  selector: '[tb-popover]',
-  exportAs: 'tbPopover',
-  // eslint-disable-next-line @angular-eslint/no-host-metadata-property
-  host: {
-    '[class.tb-popover-open]': 'visible'
-  }
+    // eslint-disable-next-line @angular-eslint/directive-selector
+    selector: '[tb-popover]',
+    exportAs: 'tbPopover',
+    // eslint-disable-next-line @angular-eslint/no-host-metadata-property
+    host: {
+        '[class.tb-popover-open]': 'visible'
+    },
+    standalone: false
 })
 export class TbPopoverDirective implements OnChanges, OnDestroy, AfterViewInit {
 
@@ -86,11 +83,11 @@ export class TbPopoverDirective implements OnChanges, OnDestroy, AfterViewInit {
   @Input('tbPopoverOverlayClassName') overlayClassName?: string;
   @Input('tbPopoverOverlayStyle') overlayStyle?: { [klass: string]: any };
   @Input() tbPopoverBackdrop = false;
+  @Input() tbPopoverMenu = false;
 
   // eslint-disable-next-line @angular-eslint/no-output-rename
   @Output('tbPopoverVisibleChange') readonly visibleChange = new EventEmitter<boolean>();
 
-  componentFactory: ComponentFactory<TbPopoverComponent> = this.resolver.resolveComponentFactory(TbPopoverComponent);
   component?: TbPopoverComponent;
 
   private readonly destroy$ = new Subject<void>();
@@ -101,7 +98,6 @@ export class TbPopoverDirective implements OnChanges, OnDestroy, AfterViewInit {
   constructor(
     private elementRef: ElementRef,
     private hostView: ViewContainerRef,
-    private resolver: ComponentFactoryResolver,
     private renderer: Renderer2
   ) {}
 
@@ -146,7 +142,7 @@ export class TbPopoverDirective implements OnChanges, OnDestroy, AfterViewInit {
   }
 
   private createComponent(): void {
-    const componentRef = this.hostView.createComponent(this.componentFactory);
+    const componentRef = this.hostView.createComponent(TbPopoverComponent);
 
     this.component = componentRef.instance;
 
@@ -154,7 +150,7 @@ export class TbPopoverDirective implements OnChanges, OnDestroy, AfterViewInit {
       this.renderer.parentNode(this.elementRef.nativeElement),
       componentRef.location.nativeElement
     );
-    this.component.setOverlayOrigin(new CdkOverlayOrigin(this.origin || this.elementRef));
+    this.component.setOriginElement(this.origin || this.elementRef);
 
     this.initProperties();
 
@@ -234,7 +230,8 @@ export class TbPopoverDirective implements OnChanges, OnDestroy, AfterViewInit {
       mouseLeaveDelay: ['tbMouseLeaveDelay', () => this.mouseLeaveDelay],
       overlayClassName: ['tbOverlayClassName', () => this.overlayClassName],
       overlayStyle: ['tbOverlayStyle', () => this.overlayStyle],
-      tbPopoverBackdrop: ['tbBackdrop', () => this.tbPopoverBackdrop]
+      tbPopoverBackdrop: ['tbBackdrop', () => this.tbPopoverBackdrop],
+      tbPopoverMenu: ['tbMenu', () => this.tbPopoverMenu]
     };
 
     (keys || Object.keys(mappingProperties).filter(key => !key.startsWith('directive'))).forEach(
@@ -298,54 +295,64 @@ export class TbPopoverDirective implements OnChanges, OnDestroy, AfterViewInit {
 }
 
 @Component({
-  selector: 'tb-popover',
-  exportAs: 'tbPopoverComponent',
-  animations: [popoverMotion],
-  changeDetection: ChangeDetectionStrategy.OnPush,
-  encapsulation: ViewEncapsulation.None,
-  styleUrls: ['./popover.component.scss'],
-  template: `
+    selector: 'tb-popover',
+    exportAs: 'tbPopoverComponent',
+    animations: [popoverMotion],
+    changeDetection: ChangeDetectionStrategy.OnPush,
+    encapsulation: ViewEncapsulation.None,
+    styleUrls: ['./popover.component.scss'],
+    template: `
     <ng-template
       #overlay="cdkConnectedOverlay"
       cdkConnectedOverlay
       [cdkConnectedOverlayHasBackdrop]="hasBackdrop"
+      [cdkConnectedOverlayBackdropClass]="backdropClass"
       [cdkConnectedOverlayOrigin]="origin"
       [cdkConnectedOverlayPositions]="positions"
+      [cdkConnectedOverlayScrollStrategy]="scrollStrategy"
       [cdkConnectedOverlayOpen]="visible"
-      [cdkConnectedOverlayPush]="true"
+      [cdkConnectedOverlayPush]="!strictPosition"
+      [cdkConnectedOverlayFlexibleDimensions]="strictPosition"
+      [cdkConnectedOverlayGrowAfterOpen]="strictPosition"
       (overlayOutsideClick)="onClickOutside($event)"
       (detach)="hide()"
       (positionChange)="onPositionChange($event)"
-    >
+      >
       <div #popoverRoot [@popoverMotion]="tbAnimationState"
-           (@popoverMotion.done)="animationDone()">
+        (@popoverMotion.done)="animationDone()">
         <div
           #popover
           class="tb-popover"
+          [class.strict-position]="strictPosition"
           [class.tb-popover-rtl]="dir === 'rtl'"
-          [ngClass]="classMap"
-          [ngStyle]="tbOverlayStyle"
-        >
+          [class]="classMap"
+          [style]="tbOverlayStyle"
+          >
           <div class="tb-popover-content">
             <div class="tb-popover-arrow">
               <span class="tb-popover-arrow-content"></span>
             </div>
-            <div class="tb-popover-inner" [ngStyle]="tbPopoverInnerStyle" role="tooltip">
-              <div *ngIf="tbShowCloseButton" class="tb-popover-close-button" (click)="closeButtonClick($event)">×</div>
+            <div class="tb-popover-inner" [style]="tbPopoverInnerStyle" role="tooltip">
+              @if (tbShowCloseButton && !tbMenu) {
+                <div class="tb-popover-close-button" (click)="closeButtonClick($event)">×</div>
+              }
               <div style="width: 100%; height: 100%;">
-                <div class="tb-popover-inner-content">
-                  <ng-container *ngIf="tbContent">
+                <div class="tb-popover-inner-content"  [style]="tbPopoverInnerContentStyle"
+                  [class.strict-position]="strictPosition">
+                  @if (tbContent) {
                     <ng-container *tbStringTemplateOutlet="tbContent; context: tbComponentContext">
                       {{ tbContent }}
                     </ng-container>
-                  </ng-container>
-                  <ng-container *ngIf="tbComponentFactory"
-                                [tbComponentOutlet]="tbComponentFactory"
-                                [tbComponentInjector]="tbComponentInjector"
-                                [tbComponentOutletContext]="tbComponentContext"
-                                (componentChange)="onComponentChange($event)"
-                                [tbComponentStyle]="tbComponentStyle">
-                  </ng-container>
+                  }
+                  @if (tbComponent) {
+                    <ng-container
+                      [tbComponentOutlet]="tbComponent"
+                      [tbComponentInjector]="tbComponentInjector"
+                      [tbComponentOutletContext]="tbComponentContext"
+                      (componentChange)="onComponentChange($event)"
+                      [tbComponentStyle]="tbComponentStyle">
+                    </ng-container>
+                  }
                 </div>
               </div>
             </div>
@@ -353,7 +360,8 @@ export class TbPopoverDirective implements OnChanges, OnDestroy, AfterViewInit {
         </div>
       </div>
     </ng-template>
-  `
+    `,
+    standalone: false
 })
 export class TbPopoverComponent<T = any> implements OnDestroy, OnInit {
 
@@ -362,22 +370,25 @@ export class TbPopoverComponent<T = any> implements OnDestroy, OnInit {
   @ViewChild('popover', { static: false }) popover!: ElementRef<HTMLElement>;
 
   tbContent: string | TemplateRef<void> | null = null;
-  tbComponentFactory: ComponentFactory<T> | null = null;
+  tbComponent: Type<T> | null = null;
   tbComponentRef: ComponentRef<T> | null = null;
   tbComponentContext: any;
   tbComponentInjector: Injector | null = null;
   tbComponentStyle: { [klass: string]: any }  = {};
   tbOverlayClassName!: string;
-  tbOverlayStyle: { [klass: string]: any } = {};
   tbPopoverInnerStyle: { [klass: string]: any } = {};
+  tbPopoverInnerContentStyle: { [klass: string]: any } = {};
   tbBackdrop = false;
+  tbMenu = false;
   tbMouseEnterDelay?: number;
   tbMouseLeaveDelay?: number;
   tbHideOnClickOutside = true;
   tbShowCloseButton = true;
+  tbModal = false;
 
   tbAnimationState = 'active';
 
+  tbHideStart = new Subject<void>();
   tbVisibleChange = new Subject<boolean>();
   tbAnimationDone = new Subject<void>();
   tbComponentChange = new Subject<ComponentRef<any>>();
@@ -432,24 +443,54 @@ export class TbPopoverComponent<T = any> implements OnDestroy, OnInit {
 
   protected trigger: TbPopoverTrigger = 'hover';
 
-  set tbPlacement(value: PopoverPlacement | PopoverPlacement[]) {
+  set tbPlacement(value: PopoverPreferredPlacement) {
     if (typeof value === 'string') {
-      this.positions = [POSITION_MAP[value], ...DEFAULT_POPOVER_POSITIONS];
+      if (isStrictPopoverPlacement(value)) {
+        const placement = convertStrictPopoverPlacement(value as StrictPopoverPlacement);
+        this.positions = [POSITION_MAP[placement]];
+        this.strictPosition = true;
+      } else {
+        this.positions = [POSITION_MAP[value], ...DEFAULT_POPOVER_POSITIONS];
+      }
     } else {
-      const preferredPosition = value.map(placement => POSITION_MAP[placement]);
-      this.positions = [...preferredPosition, ...DEFAULT_POPOVER_POSITIONS];
+      if (value.length && isStrictPopoverPlacement(value[0])) {
+        this.positions = value.map((val: any) => POSITION_MAP[convertStrictPopoverPlacement(val)]);
+        this.strictPosition = true;
+      } else {
+        const preferredPosition = value.map(placement => POSITION_MAP[placement]);
+        this.positions = [...preferredPosition, ...DEFAULT_POPOVER_POSITIONS];
+      }
     }
   }
 
   get hasBackdrop(): boolean {
-    return this.tbTrigger === 'click' ? this.tbBackdrop : false;
+    return this.tbModal || (this.tbTrigger === 'click' && this.tbBackdrop);
+  }
+
+  get backdropClass(): string {
+    return this.tbModal ? 'tb-popover-overlay-backdrop' : '';
+  }
+
+
+  set tbOverlayStyle(value: { [klass: string]: any }) {
+    this._tbOverlayStyle = value;
+    if (this.popover) {
+      this.cdr.detectChanges();
+    }
+  }
+
+  get tbOverlayStyle(): { [klass: string]: any } {
+    return this._tbOverlayStyle;
   }
 
   preferredPlacement: PopoverPlacement = 'top';
+  strictPosition = false;
   origin!: CdkOverlayOrigin;
+  originElement: ElementRef;
   public dir: Direction = 'ltr';
   classMap: { [klass: string]: any } = {};
   positions: ConnectionPositionPair[] = [...DEFAULT_POPOVER_POSITIONS];
+  scrollStrategy = new NoopScrollStrategy();
   private parentScrollSubscription: Subscription = null;
   private intersectionObserver = new IntersectionObserver((entries) => {
     if (this.lastIsIntersecting !== entries[0].isIntersecting) {
@@ -458,11 +499,13 @@ export class TbPopoverComponent<T = any> implements OnDestroy, OnInit {
       this.cdr.markForCheck();
     }
   }, {threshold: [0.5]});
+  private _tbOverlayStyle: { [klass: string]: any } = {};
 
   constructor(
     public cdr: ChangeDetectorRef,
     private renderer: Renderer2,
     private animationBuilder: AnimationBuilder,
+    private injector: Injector,
     @Optional() private directionality: Directionality
   ) {}
 
@@ -486,6 +529,7 @@ export class TbPopoverComponent<T = any> implements OnDestroy, OnInit {
     }
     this.intersectionObserver.disconnect();
     this.intersectionObserver = null;
+    this.tbHideStart.complete();
     this.tbVisibleChange.complete();
     this.tbAnimationDone.complete();
     this.tbDestroy.next();
@@ -504,7 +548,27 @@ export class TbPopoverComponent<T = any> implements OnDestroy, OnInit {
     if (this.tbVisible) {
       return;
     }
+    if (!this.origin) {
+        const injector: Injector = Injector.create(
+        {
+          providers: [
+            {
+              provide: ElementRef,
+              useValue: this.originElement
+            }
+          ],
+          parent: this.injector
+        });
+        runInInjectionContext(injector, () => {
+          this.origin = new CdkOverlayOrigin();
+          this.doShow();
+        });
+    } else {
+      this.doShow();
+    }
+  }
 
+  private doShow(): void {
     if (!this.isEmpty()) {
       this.tbVisible = true;
       this.tbVisibleChange.next(true);
@@ -528,6 +592,7 @@ export class TbPopoverComponent<T = any> implements OnDestroy, OnInit {
     if (!this.tbVisible) {
       return;
     }
+    this.tbHideStart.next();
     if (this.parentScrollSubscription) {
       this.parentScrollSubscription.unsubscribe();
       this.parentScrollSubscription = null;
@@ -598,20 +663,20 @@ export class TbPopoverComponent<T = any> implements OnDestroy, OnInit {
   updateStyles(): void {
     this.classMap = {
       [`tb-popover-placement-${this.preferredPlacement}`]: true,
-      ['tb-popover-hidden']: this.tbHidden || !this.lastIsIntersecting
+      ['tb-popover-hidden']: this.tbHidden || !this.lastIsIntersecting,
+      ['tb-menu']: this.tbMenu
     };
     if (this.tbOverlayClassName) {
       this.classMap[this.tbOverlayClassName] = true;
     }
   }
 
-  setOverlayOrigin(origin: CdkOverlayOrigin): void {
-    this.origin = origin;
-    this.cdr.markForCheck();
+  setOriginElement(originElement: ElementRef): void {
+    this.originElement = originElement;
   }
 
   onClickOutside(event: MouseEvent): void {
-    if (this.tbHideOnClickOutside && !this.origin.elementRef.nativeElement.contains(event.target) && this.tbTrigger !== null) {
+    if (!this.tbModal && this.tbHideOnClickOutside && !this.origin.elementRef.nativeElement.contains(event.target) && this.tbTrigger !== null) {
       if (!this.isTopOverlay(event.target as Element)) {
         this.hide();
       }
@@ -620,6 +685,10 @@ export class TbPopoverComponent<T = any> implements OnDestroy, OnInit {
 
   onComponentChange(component: ComponentRef<any>) {
     this.tbComponentRef = component;
+    if (this.strictPosition) {
+      this.renderer.setStyle(this.tbComponentRef.location.nativeElement, 'display', 'flex');
+      this.renderer.setStyle(this.tbComponentRef.location.nativeElement, 'height', '100%');
+    }
     this.tbComponentChange.next(component);
   }
 
@@ -649,7 +718,7 @@ export class TbPopoverComponent<T = any> implements OnDestroy, OnInit {
   }
 
   private isEmpty(): boolean {
-    return (this.tbComponentFactory instanceof ComponentFactory || this.tbContent instanceof TemplateRef)
+    return (this.tbComponent instanceof Type || this.tbContent instanceof TemplateRef)
       ? false : !isNotEmptyStr(this.tbContent);
   }
 }

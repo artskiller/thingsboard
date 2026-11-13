@@ -1,25 +1,15 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
+// SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
 package org.thingsboard.server.controller;
 
-import io.swagger.annotations.ApiOperation;
-import io.swagger.annotations.ApiParam;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
@@ -30,12 +20,13 @@ import org.thingsboard.server.common.data.exception.ThingsboardException;
 import org.thingsboard.server.common.data.id.QueueId;
 import org.thingsboard.server.common.data.page.PageData;
 import org.thingsboard.server.common.data.page.PageLink;
+import org.thingsboard.server.common.data.permission.Operation;
+import org.thingsboard.server.common.data.permission.Resource;
 import org.thingsboard.server.common.data.queue.Queue;
 import org.thingsboard.server.common.msg.queue.ServiceType;
+import org.thingsboard.server.config.annotations.ApiOperation;
 import org.thingsboard.server.queue.util.TbCoreComponent;
 import org.thingsboard.server.service.entitiy.queue.TbQueueService;
-import org.thingsboard.server.service.security.permission.Operation;
-import org.thingsboard.server.service.security.permission.Resource;
 
 import java.util.UUID;
 
@@ -45,10 +36,7 @@ import static org.thingsboard.server.controller.ControllerConstants.PAGE_SIZE_DE
 import static org.thingsboard.server.controller.ControllerConstants.QUEUE_ID_PARAM_DESCRIPTION;
 import static org.thingsboard.server.controller.ControllerConstants.QUEUE_NAME_PARAM_DESCRIPTION;
 import static org.thingsboard.server.controller.ControllerConstants.QUEUE_QUEUE_TEXT_SEARCH_DESCRIPTION;
-import static org.thingsboard.server.controller.ControllerConstants.QUEUE_SERVICE_TYPE_ALLOWABLE_VALUES;
 import static org.thingsboard.server.controller.ControllerConstants.QUEUE_SERVICE_TYPE_DESCRIPTION;
-import static org.thingsboard.server.controller.ControllerConstants.QUEUE_SORT_PROPERTY_ALLOWABLE_VALUES;
-import static org.thingsboard.server.controller.ControllerConstants.SORT_ORDER_ALLOWABLE_VALUES;
 import static org.thingsboard.server.controller.ControllerConstants.SORT_ORDER_DESCRIPTION;
 import static org.thingsboard.server.controller.ControllerConstants.SORT_PROPERTY_DESCRIPTION;
 import static org.thingsboard.server.controller.ControllerConstants.SYSTEM_AUTHORITY_PARAGRAPH;
@@ -67,19 +55,18 @@ public class QueueController extends BaseController {
             notes = "Returns a page of queues registered in the platform. " +
                     PAGE_DATA_PARAMETERS + SYSTEM_OR_TENANT_AUTHORITY_PARAGRAPH)
     @PreAuthorize("hasAnyAuthority('SYS_ADMIN', 'TENANT_ADMIN')")
-    @RequestMapping(value = "/queues", params = {"serviceType", "pageSize", "page"}, method = RequestMethod.GET)
-    @ResponseBody
-    public PageData<Queue> getTenantQueuesByServiceType(@ApiParam(value = QUEUE_SERVICE_TYPE_DESCRIPTION, allowableValues = QUEUE_SERVICE_TYPE_ALLOWABLE_VALUES, required = true)
+    @GetMapping(value = "/queues")
+    public PageData<Queue> getTenantQueuesByServiceType(@Parameter(description = QUEUE_SERVICE_TYPE_DESCRIPTION, schema = @Schema(allowableValues = {"TB-RULE-ENGINE", "TB-CORE", "TB-TRANSPORT", "JS-EXECUTOR"}, requiredMode = Schema.RequiredMode.REQUIRED))
                                                         @RequestParam String serviceType,
-                                                        @ApiParam(value = PAGE_SIZE_DESCRIPTION, required = true)
+                                                        @Parameter(description = PAGE_SIZE_DESCRIPTION, required = true)
                                                         @RequestParam int pageSize,
-                                                        @ApiParam(value = PAGE_NUMBER_DESCRIPTION, required = true)
+                                                        @Parameter(description = PAGE_NUMBER_DESCRIPTION, required = true)
                                                         @RequestParam int page,
-                                                        @ApiParam(value = QUEUE_QUEUE_TEXT_SEARCH_DESCRIPTION)
+                                                        @Parameter(description = QUEUE_QUEUE_TEXT_SEARCH_DESCRIPTION)
                                                         @RequestParam(required = false) String textSearch,
-                                                        @ApiParam(value = SORT_PROPERTY_DESCRIPTION, allowableValues = QUEUE_SORT_PROPERTY_ALLOWABLE_VALUES)
+                                                        @Parameter(description = SORT_PROPERTY_DESCRIPTION, schema = @Schema(allowableValues = {"createdTime", "name", "topic"}))
                                                         @RequestParam(required = false) String sortProperty,
-                                                        @ApiParam(value = SORT_ORDER_DESCRIPTION, allowableValues = SORT_ORDER_ALLOWABLE_VALUES)
+                                                        @Parameter(description = SORT_ORDER_DESCRIPTION, schema = @Schema(allowableValues = {"ASC", "DESC"}))
                                                         @RequestParam(required = false) String sortOrder) throws ThingsboardException {
         checkParameter("serviceType", serviceType);
         PageLink pageLink = createPageLink(pageSize, page, textSearch, sortProperty, sortOrder);
@@ -97,7 +84,7 @@ public class QueueController extends BaseController {
     @PreAuthorize("hasAnyAuthority('SYS_ADMIN', 'TENANT_ADMIN')")
     @RequestMapping(value = "/queues/{queueId}", method = RequestMethod.GET)
     @ResponseBody
-    public Queue getQueueById(@ApiParam(value = QUEUE_ID_PARAM_DESCRIPTION)
+    public Queue getQueueById(@Parameter(description = QUEUE_ID_PARAM_DESCRIPTION)
                               @PathVariable("queueId") String queueIdStr) throws ThingsboardException {
         checkParameter("queueId", queueIdStr);
         QueueId queueId = new QueueId(UUID.fromString(queueIdStr));
@@ -110,7 +97,7 @@ public class QueueController extends BaseController {
     @PreAuthorize("hasAnyAuthority('SYS_ADMIN', 'TENANT_ADMIN')")
     @RequestMapping(value = "/queues/name/{queueName}", method = RequestMethod.GET)
     @ResponseBody
-    public Queue getQueueByName(@ApiParam(value = QUEUE_NAME_PARAM_DESCRIPTION)
+    public Queue getQueueByName(@Parameter(description = QUEUE_NAME_PARAM_DESCRIPTION)
                                 @PathVariable("queueName") String queueName) throws ThingsboardException {
         checkParameter("queueName", queueName);
         return checkNotNull(queueService.findQueueByTenantIdAndName(getTenantId(), queueName));
@@ -124,11 +111,10 @@ public class QueueController extends BaseController {
                     "Remove 'id', 'tenantId' from the request body example (below) to create new Queue entity. " +
                     SYSTEM_AUTHORITY_PARAGRAPH)
     @PreAuthorize("hasAnyAuthority('SYS_ADMIN')")
-    @RequestMapping(value = "/queues", params = {"serviceType"}, method = RequestMethod.POST)
-    @ResponseBody
-    public Queue saveQueue(@ApiParam(value = "A JSON value representing the queue.")
+    @PostMapping(value = "/queues")
+    public Queue saveQueue(@Parameter(description = "A JSON value representing the queue.")
                            @RequestBody Queue queue,
-                           @ApiParam(value = QUEUE_SERVICE_TYPE_DESCRIPTION, allowableValues = QUEUE_SERVICE_TYPE_ALLOWABLE_VALUES, required = true)
+                           @Parameter(description = QUEUE_SERVICE_TYPE_DESCRIPTION, schema = @Schema(allowableValues = {"TB-RULE-ENGINE", "TB-CORE", "TB-TRANSPORT", "JS-EXECUTOR"}, requiredMode = Schema.RequiredMode.REQUIRED))
                            @RequestParam String serviceType) throws ThingsboardException {
         checkParameter("serviceType", serviceType);
         queue.setTenantId(getCurrentUser().getTenantId());
@@ -151,11 +137,12 @@ public class QueueController extends BaseController {
     @PreAuthorize("hasAnyAuthority('SYS_ADMIN')")
     @RequestMapping(value = "/queues/{queueId}", method = RequestMethod.DELETE)
     @ResponseBody
-    public void deleteQueue(@ApiParam(value = QUEUE_ID_PARAM_DESCRIPTION)
+    public void deleteQueue(@Parameter(description = QUEUE_ID_PARAM_DESCRIPTION)
                             @PathVariable("queueId") String queueIdStr) throws ThingsboardException {
         checkParameter("queueId", queueIdStr);
         QueueId queueId = new QueueId(toUUID(queueIdStr));
         checkQueueId(queueId, Operation.DELETE);
         tbQueueService.deleteQueue(getTenantId(), queueId);
     }
+
 }

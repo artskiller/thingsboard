@@ -1,18 +1,5 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-License-Identifier: Apache-2.0
 package org.thingsboard.server.dao.service;
 
 import com.google.common.util.concurrent.Futures;
@@ -24,6 +11,7 @@ import org.junit.Test;
 import org.junit.jupiter.api.Assertions;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.thingsboard.common.util.ThingsBoardThreadFactory;
+import org.thingsboard.server.common.data.EntityInfo;
 import org.thingsboard.server.common.data.asset.Asset;
 import org.thingsboard.server.common.data.asset.AssetProfile;
 import org.thingsboard.server.common.data.asset.AssetProfileInfo;
@@ -31,14 +19,17 @@ import org.thingsboard.server.common.data.page.PageData;
 import org.thingsboard.server.common.data.page.PageLink;
 import org.thingsboard.server.dao.asset.AssetProfileService;
 import org.thingsboard.server.dao.asset.AssetService;
-import org.thingsboard.server.dao.exception.DataValidationException;
+import org.thingsboard.server.exception.DataValidationException;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 @DaoSqlTest
 public class AssetProfileServiceTest extends AbstractServiceTest {
@@ -160,6 +151,18 @@ public class AssetProfileServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    public void testSaveAssetProfileWithNameDefaultAndProfileWithIsDefaultAndDifferentNameAlreadyExists() {
+        AssetProfile defaultAssetProfile = assetProfileService.findDefaultAssetProfile(tenantId);
+        Assert.assertNotNull(defaultAssetProfile);
+        defaultAssetProfile.setName("Asset Profile 1");
+        assetProfileService.saveAssetProfile(defaultAssetProfile);
+        AssetProfile createdAssetProfile = assetProfileService.findOrCreateAssetProfile(tenantId, "default");
+        Assert.assertNotNull(createdAssetProfile);
+        Assert.assertEquals("default", createdAssetProfile.getName());
+        Assert.assertFalse(createdAssetProfile.isDefault());
+    }
+
+    @Test
     public void testDeleteAssetProfileWithExistingAsset() {
         AssetProfile assetProfile = this.createAssetProfile(tenantId, "Asset Profile");
         AssetProfile savedAssetProfile = assetProfileService.saveAssetProfile(assetProfile);
@@ -271,5 +274,98 @@ public class AssetProfileServiceTest extends AbstractServiceTest {
         Assert.assertFalse(pageData.hasNext());
         Assert.assertEquals(1, pageData.getTotalElements());
     }
+
+    @Test
+    public void testFindAllassetProfilesByTenantId() {
+        int assetProfilesCount = 4; // 3 created + default
+        var assetProfiles = new ArrayList<AssetProfile>(4);
+
+        var profileC = assetProfileService.saveAssetProfile(
+                createAssetProfile(tenantId, "profile C"));
+        assetProfiles.add(assetProfileService.saveAssetProfile(profileC));
+
+
+        var profileA = assetProfileService.saveAssetProfile(
+                createAssetProfile(tenantId, "profile A"));
+        assetProfiles.add(assetProfileService.saveAssetProfile(profileA));
+
+
+        var profileB = assetProfileService.saveAssetProfile(
+                createAssetProfile(tenantId, "profile B"));
+        assetProfiles.add(assetProfileService.saveAssetProfile(profileB));
+
+
+        assetProfiles.add(assetProfileService.findDefaultAssetProfile(tenantId));
+
+        List<EntityInfo> sortedProfileInfos = assetProfiles.stream()
+                .map(profile -> new EntityInfo(profile.getId(), profile.getName()))
+                .sorted(Comparator.comparing(EntityInfo::getName))
+                .collect(Collectors.toList());
+
+        var assetProfileInfos = assetProfileService
+                .findAssetProfileNamesByTenantId(tenantId, false);
+
+        assertThat(assetProfileInfos).isNotNull();
+        assertThat(assetProfileInfos).hasSize(assetProfilesCount);
+        assertThat(assetProfileInfos).isEqualTo(sortedProfileInfos);
+    }
+
+    @Test
+    public void testFindActiveOnlyassetProfilesByTenantId() {
+
+        String profileCName = "profile C";
+        assetProfileService.saveAssetProfile(
+                createAssetProfile(tenantId, profileCName));
+
+        String profileAName = "profile A";
+        assetProfileService.saveAssetProfile(
+                createAssetProfile(tenantId, profileAName));
+
+        String profileBName = "profile B";
+        assetProfileService.saveAssetProfile(
+                createAssetProfile(tenantId, profileBName));
+
+
+        var assetProfileInfos = assetProfileService
+                .findAssetProfileNamesByTenantId(tenantId, true);
+
+        assertThat(assetProfileInfos).isNotNull();
+        assertThat(assetProfileInfos).isEmpty();
+
+        var assetC = new Asset();
+        assetC.setName("Test asset C");
+        assetC.setType(profileCName);
+        assetC.setTenantId(tenantId);
+
+        assetC = assetService.saveAsset(assetC);
+
+        var assetA = new Asset();
+        assetA.setName("Test asset A");
+        assetA.setType(profileAName);
+        assetA.setTenantId(tenantId);
+
+        assetA = assetService.saveAsset(assetA);
+
+        var assetB = new Asset();
+        assetB.setName("Test asset B");
+        assetB.setType(profileBName);
+        assetB.setTenantId(tenantId);
+
+        assetB = assetService.saveAsset(assetB);
+
+        assetProfileInfos = assetProfileService
+                .findAssetProfileNamesByTenantId(tenantId, true);
+
+        var expected = List.of(
+                new EntityInfo(assetA.getAssetProfileId(), profileAName),
+                new EntityInfo(assetB.getAssetProfileId(), profileBName),
+                new EntityInfo(assetC.getAssetProfileId(), profileCName)
+        );
+
+        assertThat(assetProfileInfos).isNotEmpty();
+        assertThat(assetProfileInfos).hasSize(3);
+        assertThat(assetProfileInfos).isEqualTo(expected);
+    }
+
 
 }

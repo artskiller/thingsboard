@@ -1,18 +1,5 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-License-Identifier: Apache-2.0
 package org.thingsboard.mqtt;
 
 import io.netty.buffer.ByteBuf;
@@ -21,6 +8,7 @@ import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.handler.codec.mqtt.MqttQoS;
 import io.netty.util.concurrent.Future;
+import io.netty.util.concurrent.Promise;
 import org.thingsboard.common.util.ListeningExecutor;
 
 public interface MqttClient {
@@ -32,7 +20,7 @@ public interface MqttClient {
      * @param host The ip address or host to connect to
      * @return A future which will be completed when the connection is opened and we received an CONNACK
      */
-    Future<MqttConnectResult> connect(String host);
+    Promise<MqttConnectResult> connect(String host);
 
     /**
      * Connect to the specified hostname/ip using the specified port
@@ -41,7 +29,7 @@ public interface MqttClient {
      * @param port The tcp port to connect to
      * @return A future which will be completed when the connection is opened and we received an CONNACK
      */
-    Future<MqttConnectResult> connect(String host, int port);
+    Promise<MqttConnectResult> connect(String host, int port);
 
     /**
      *
@@ -55,7 +43,7 @@ public interface MqttClient {
      * @return A future which will be completed when the connection is opened and we received an CONNACK
      * @throws IllegalStateException if no previous {@link #connect(String, int)} calls were attempted
      */
-    Future<MqttConnectResult> reconnect();
+    Promise<MqttConnectResult> reconnect();
 
     /**
      * Retrieve the netty {@link EventLoopGroup} we are using
@@ -183,7 +171,7 @@ public interface MqttClient {
      * @param config The config object to use while looking for settings
      * @param defaultHandler The handler for incoming messages that do not match any topic subscriptions
      */
-    static MqttClient create(MqttClientConfig config, MqttHandler defaultHandler, ListeningExecutor handlerExecutor){
+    static MqttClient create(MqttClientConfig config, MqttHandler defaultHandler, ListeningExecutor handlerExecutor) {
         return new MqttClientImpl(config, defaultHandler, handlerExecutor);
     }
 

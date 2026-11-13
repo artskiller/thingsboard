@@ -1,18 +1,5 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-License-Identifier: Apache-2.0
 package org.thingsboard.server.common.transport;
 
 import org.thingsboard.server.common.data.DeviceProfile;
@@ -66,9 +53,6 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/**
- * Created by ashvayka on 04.10.18.
- */
 public interface TransportService {
 
     GetEntityProfileResponseMsg getEntityProfile(GetEntityProfileRequestMsg msg);
@@ -98,7 +82,7 @@ public interface TransportService {
     void process(ValidateDeviceLwM2MCredentialsRequestMsg msg,
                  TransportServiceCallback<ValidateDeviceCredentialsResponse> callback);
 
-    void process(GetOrCreateDeviceFromGatewayRequestMsg msg,
+    void process(TenantId tenantId, GetOrCreateDeviceFromGatewayRequestMsg msg,
                  TransportServiceCallback<GetOrCreateDeviceFromGatewayResponse> callback);
 
     void process(ProvisionDeviceRequestMsg msg,
@@ -145,7 +129,7 @@ public interface TransportService {
 
     SessionMetaData registerSyncSession(SessionInfoProto sessionInfo, SessionMsgListener listener, long timeout);
 
-    void reportActivity(SessionInfoProto sessionInfo);
+    void recordActivity(SessionInfoProto sessionInfo);
 
     void lifecycleEvent(TenantId tenantId, DeviceId deviceId, ComponentLifecycleEvent eventType, boolean success, Throwable error);
 
@@ -161,5 +145,6 @@ public interface TransportService {
 
     boolean hasSession(SessionInfoProto sessionInfo);
 
-    void createGaugeStats(String openConnections, AtomicInteger connectionsCounter);
+    void createGaugeStats(String statsName, AtomicInteger number, String... tags);
+
 }

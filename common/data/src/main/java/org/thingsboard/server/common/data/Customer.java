@@ -1,47 +1,45 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
+// SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
 package org.thingsboard.server.common.data;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonProperty.Access;
 import com.fasterxml.jackson.databind.JsonNode;
-import io.swagger.annotations.ApiModelProperty;
+import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.Setter;
+import org.thingsboard.server.common.data.id.CustomMenuId;
 import org.thingsboard.server.common.data.id.CustomerId;
+import org.thingsboard.server.common.data.id.EntityId;
 import org.thingsboard.server.common.data.id.TenantId;
 import org.thingsboard.server.common.data.validation.Length;
 import org.thingsboard.server.common.data.validation.NoXss;
 
 @EqualsAndHashCode(callSuper = true)
-public class Customer extends ContactBased<CustomerId> implements HasTenantId, ExportableEntity<CustomerId>, HasTitle {
+public class Customer extends ContactBased<CustomerId> implements HasTenantId, HasTitle, GroupEntity<CustomerId>, ExportableEntity<CustomerId>, HasVersion {
 
     private static final long serialVersionUID = -1599722990298929275L;
 
     @NoXss
     @Length(fieldName = "title")
-    @ApiModelProperty(position = 3, required = true, value = "Title of the customer", example = "Company A")
+    @Schema(requiredMode = Schema.RequiredMode.REQUIRED, description = "Title of the customer", example = "Company A")
     private String title;
-    @ApiModelProperty(position = 5, value = "JSON object with Tenant Id")
+    @Schema(description = "JSON object with Tenant Id")
     private TenantId tenantId;
+    @Schema(description = "JSON object with parent Customer Id")
+    private CustomerId parentCustomerId;
+
+    @Getter
+    @Setter
+    private CustomerId externalId;
+    @Getter @Setter
+    private Long version;
 
     @Getter @Setter
-    private CustomerId externalId;
+    private CustomMenuId customMenuId;
 
     public Customer() {
         super();
@@ -54,8 +52,11 @@ public class Customer extends ContactBased<CustomerId> implements HasTenantId, E
     public Customer(Customer customer) {
         super(customer);
         this.tenantId = customer.getTenantId();
+        this.parentCustomerId = customer.getParentCustomerId();
         this.title = customer.getTitle();
         this.externalId = customer.getExternalId();
+        this.version = customer.getVersion();
+        this.customMenuId = customer.getCustomMenuId();
     }
 
     public TenantId getTenantId() {
@@ -66,6 +67,41 @@ public class Customer extends ContactBased<CustomerId> implements HasTenantId, E
         this.tenantId = tenantId;
     }
 
+    public CustomerId getParentCustomerId() {
+        return parentCustomerId;
+    }
+
+    public void setParentCustomerId(CustomerId parentCustomerId) {
+        this.parentCustomerId = parentCustomerId;
+    }
+
+    @Override
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    @Schema(accessMode = Schema.AccessMode.READ_ONLY, description = "JSON object with parent Customer Id")
+    public CustomerId getCustomerId() {
+        return parentCustomerId;
+    }
+
+    @Schema(description = "JSON object with Customer or Tenant Id", accessMode = Schema.AccessMode.READ_ONLY)
+    @Override
+    public EntityId getOwnerId() {
+        return parentCustomerId != null && !parentCustomerId.isNullUid() ? parentCustomerId : tenantId;
+    }
+
+    @Override
+    public void setOwnerId(EntityId entityId) {
+        if (EntityType.CUSTOMER.equals(entityId.getEntityType())) {
+            this.parentCustomerId = new CustomerId(entityId.getId());
+        } else {
+            this.parentCustomerId = new CustomerId(CustomerId.NULL_UUID);
+        }
+    }
+
+    @JsonIgnore
+    public boolean isSubCustomer() {
+        return parentCustomerId != null && !parentCustomerId.isNullUid();
+    }
+
     public String getTitle() {
         return title;
     }
@@ -74,70 +110,75 @@ public class Customer extends ContactBased<CustomerId> implements HasTenantId, E
         this.title = title;
     }
 
-    @ApiModelProperty(position = 1, value = "JSON object with the customer Id. " +
+    @Schema(description = "JSON object with the customer Id. " +
             "Specify this field to update the customer. " +
             "Referencing non-existing customer Id will cause error. " +
-            "Omit this field to create new customer." )
+            "Omit this field to create new customer.")
     @Override
     public CustomerId getId() {
         return super.getId();
     }
 
-    @ApiModelProperty(position = 2, value = "Timestamp of the customer creation, in milliseconds", example = "1609459200000", accessMode = ApiModelProperty.AccessMode.READ_ONLY)
+    @Schema(description = "Timestamp of the customer creation, in milliseconds", example = "1609459200000", accessMode = Schema.AccessMode.READ_ONLY)
     @Override
     public long getCreatedTime() {
         return super.getCreatedTime();
     }
 
-    @ApiModelProperty(position = 6, value = "Country", example = "US")
+    @Schema(description = "Country", example = "US")
     @Override
     public String getCountry() {
         return super.getCountry();
     }
 
-    @ApiModelProperty(position = 7, value = "State", example = "NY")
+    @Schema(description = "State", example = "NY")
     @Override
     public String getState() {
         return super.getState();
     }
 
-    @ApiModelProperty(position = 8, value = "City", example = "New York")
+    @Schema(description = "City", example = "New York")
     @Override
     public String getCity() {
         return super.getCity();
     }
 
-    @ApiModelProperty(position = 9, value = "Address Line 1", example = "42 Broadway Suite 12-400")
+    @Schema(description = "Address Line 1", example = "42 Broadway Suite 12-400")
     @Override
     public String getAddress() {
         return super.getAddress();
     }
 
-    @ApiModelProperty(position = 10, value = "Address Line 2", example = "")
+    @Schema(description = "Address Line 2", example = "")
     @Override
     public String getAddress2() {
         return super.getAddress2();
     }
 
-    @ApiModelProperty(position = 11, value = "Zip code", example = "10004")
+    @Schema(description = "Zip code", example = "10004")
     @Override
     public String getZip() {
         return super.getZip();
     }
 
-    @ApiModelProperty(position = 12, value = "Phone number", example = "+1(415)777-7777")
+    @Schema(description = "Phone number", example = "+1(415)777-7777")
     @Override
     public String getPhone() {
         return super.getPhone();
     }
 
-    @ApiModelProperty(position = 13, required = true, value = "Email", example = "example@company.com")
+    @Schema(description = "Email", example = "example@company.com")
     @Override
     public String getEmail() {
         return super.getEmail();
     }
 
-    @ApiModelProperty(position = 14, value = "Additional parameters of the device", dataType = "com.fasterxml.jackson.databind.JsonNode")
+    @Schema(description = "Additional parameters of the customer. " +
+            "May include: 'description' (string), 'homeDashboardId' (string, UUID of the home dashboard), " +
+            "'homeDashboardHideToolbar' (boolean, whether to hide the dashboard toolbar), " +
+            "'isPublic' (boolean, whether this is a public customer).",
+            implementation = com.fasterxml.jackson.databind.JsonNode.class,
+            example = "{\"description\":\"Regional customer\",\"homeDashboardId\":\"784f394c-42b6-435a-983c-b7beff2784f9\",\"homeDashboardHideToolbar\":false,\"isPublic\":false}")
     @Override
     public JsonNode getAdditionalInfo() {
         return super.getAdditionalInfo();
@@ -159,7 +200,7 @@ public class Customer extends ContactBased<CustomerId> implements HasTenantId, E
 
     @Override
     @JsonProperty(access = Access.READ_ONLY)
-    @ApiModelProperty(position = 4, value = "Name of the customer. Read-only, duplicated from title for backward compatibility", example = "Company A", accessMode = ApiModelProperty.AccessMode.READ_ONLY)
+    @Schema(description = "Name of the customer. Read-only, duplicated from title for backward compatibility", example = "Company A", accessMode = Schema.AccessMode.READ_ONLY)
     public String getName() {
         return title;
     }
@@ -196,4 +237,12 @@ public class Customer extends ContactBased<CustomerId> implements HasTenantId, E
         builder.append("]");
         return builder.toString();
     }
+
+    @Override
+    @JsonIgnore
+    public EntityType getEntityType() {
+        return EntityType.CUSTOMER;
+    }
+
+
 }

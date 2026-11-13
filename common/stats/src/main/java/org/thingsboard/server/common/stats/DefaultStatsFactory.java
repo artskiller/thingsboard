@@ -1,31 +1,22 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
+// SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
 package org.thingsboard.server.common.stats;
 
 import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Meter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.Timer;
+import jakarta.annotation.PostConstruct;
+import org.apache.commons.lang3.ArrayUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.thingsboard.server.common.data.StringUtils;
 
-import javax.annotation.PostConstruct;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.ToDoubleFunction;
 
 @Service
 public class DefaultStatsFactory implements StatsFactory {
@@ -61,12 +52,11 @@ public class DefaultStatsFactory implements StatsFactory {
 
 
     @Override
-    public StatsCounter createStatsCounter(String key, String statsName) {
+    public StatsCounter createStatsCounter(String key, String statsName, String... otherTags) {
+        String[] tags = getTags(statsName, otherTags);
         return new StatsCounter(
                 new AtomicInteger(0),
-                metricsEnabled ?
-                        meterRegistry.counter(key, STATS_NAME_TAG, statsName)
-                        : STUB_COUNTER,
+                metricsEnabled ? meterRegistry.counter(key, tags) : STUB_COUNTER,
                 statsName
         );
     }
@@ -83,7 +73,17 @@ public class DefaultStatsFactory implements StatsFactory {
 
     @Override
     public <T extends Number> T createGauge(String key, T number, String... tags) {
-        return meterRegistry.gauge(key, Tags.of(tags), number);
+        return metricsEnabled ? meterRegistry.gauge(key, Tags.of(tags), number) : number;
+    }
+
+    @Override
+    public <T extends Number> T createGauge(String type, String name, T number, String... tags) {
+        return createGauge(type, number, getTags(name, tags));
+    }
+
+    @Override
+    public <S> void createGauge(String type, String name, S stateObject, ToDoubleFunction<S> numberProvider, String... tags) {
+        meterRegistry.gauge(type, Tags.of(getTags(name, tags)), stateObject, numberProvider);
     }
 
     @Override
@@ -105,6 +105,24 @@ public class DefaultStatsFactory implements StatsFactory {
         return timerBuilder.register(meterRegistry);
     }
 
+    @Override
+    public StatsTimer createStatsTimer(String type, String name, String... tags) {
+        return new StatsTimer(name, Timer.builder(type)
+                .tags(getTags(name, tags))
+                .register(meterRegistry));
+    }
+
+    private static String[] getTags(String statsName, String[] otherTags) {
+        String[] tags = new String[]{STATS_NAME_TAG, statsName};
+        if (otherTags.length > 0) {
+            if (otherTags.length % 2 != 0) {
+                throw new IllegalArgumentException("Invalid tags array size");
+            }
+            tags = ArrayUtils.addAll(tags, otherTags);
+        }
+        return tags;
+    }
+
     private static class StubCounter implements Counter {
         @Override
         public void increment(double amount) {
@@ -120,4 +138,9 @@ public class DefaultStatsFactory implements StatsFactory {
             return null;
         }
     }
+
+    public Meter remove(Counter counter) {
+        return meterRegistry.remove(counter.getId());
+    }
+
 }

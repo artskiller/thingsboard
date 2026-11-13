@@ -1,26 +1,12 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-License-Identifier: Apache-2.0
 package org.thingsboard.server.exception;
 
-import io.swagger.annotations.ApiModel;
-import io.swagger.annotations.ApiModelProperty;
+import io.swagger.v3.oas.annotations.media.Schema;
 import org.springframework.http.HttpStatus;
 import org.thingsboard.server.common.data.exception.ThingsboardErrorCode;
 
-@ApiModel
+@Schema
 public class ThingsboardCredentialsExpiredResponse extends ThingsboardErrorResponse {
 
     private final String resetToken;
@@ -34,7 +20,7 @@ public class ThingsboardCredentialsExpiredResponse extends ThingsboardErrorRespo
         return new ThingsboardCredentialsExpiredResponse(message, resetToken);
     }
 
-    @ApiModelProperty(position = 5, value = "Password reset token", accessMode = ApiModelProperty.AccessMode.READ_ONLY)
+    @Schema(description = "Password reset token", accessMode = Schema.AccessMode.READ_ONLY)
     public String getResetToken() {
         return resetToken;
     }

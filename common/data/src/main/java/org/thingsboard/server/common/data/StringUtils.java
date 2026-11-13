@@ -1,25 +1,20 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
+// SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
 package org.thingsboard.server.common.data;
 
 import com.google.common.base.Splitter;
 import org.apache.commons.lang3.RandomStringUtils;
+import org.apache.commons.lang3.Strings;
 
 import java.security.SecureRandom;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
+import java.util.List;
+import java.util.Objects;
+import java.util.function.Function;
+import java.util.regex.Pattern;
 
 import static org.apache.commons.lang3.StringUtils.repeat;
 
@@ -32,6 +27,12 @@ public class StringUtils {
     public static final String EMPTY = "";
 
     public static final int INDEX_NOT_FOUND = -1;
+
+    public static final Pattern CONTROL_CHARS = Pattern.compile("[\\x00-\\x1F\\x7F]");
+
+    public static boolean containsControlChars(String source) {
+        return source != null && CONTROL_CHARS.matcher(source).find();
+    }
 
     public static boolean isEmpty(String source) {
         return source == null || source.isEmpty();
@@ -106,6 +107,10 @@ public class StringUtils {
         return input.substring(0, startIndexInclusive) + obfuscatedPart + input.substring(endIndexExclusive);
     }
 
+    public static String emptyIfNull(String src) {
+        return src != null ? src : "";
+    }
+
     public static Iterable<String> split(String value, int maxPartSize) {
         return Splitter.fixedLength(maxPartSize).split(value);
     }
@@ -127,7 +132,7 @@ public class StringUtils {
     }
 
     public static boolean endsWith(String str, String suffix) {
-        return org.apache.commons.lang3.StringUtils.endsWith(str, suffix);
+        return Strings.CS.endsWith(str, suffix);
     }
 
     public static boolean hasLength(String str) {
@@ -143,7 +148,7 @@ public class StringUtils {
     }
 
     public static String defaultString(String s, String defaultValue) {
-        return org.apache.commons.lang3.StringUtils.defaultString(s, defaultValue);
+        return Objects.toString(s, defaultValue);
     }
 
     public static boolean isNumeric(String str) {
@@ -151,10 +156,14 @@ public class StringUtils {
     }
 
     public static boolean equals(String str1, String str2) {
-        return org.apache.commons.lang3.StringUtils.equals(str1, str2);
+        return Objects.equals(str1, str2);
     }
 
     public static boolean equalsAny(String string, String... otherStrings) {
+        return equalsAny(string, Arrays.asList(otherStrings));
+    }
+
+    public static boolean equalsAny(String string, List<String> otherStrings) {
         for (String otherString : otherStrings) {
             if (equals(string, otherString)) {
                 return true;
@@ -172,8 +181,16 @@ public class StringUtils {
         return false;
     }
 
+    public static String substringBeforeLast(String str, String separator) {
+        return org.apache.commons.lang3.StringUtils.substringBeforeLast(str, separator);
+    }
+
     public static String substringAfterLast(String str, String sep) {
         return org.apache.commons.lang3.StringUtils.substringAfterLast(str, sep);
+    }
+
+    public static String removeEnd(String str, String suffix) {
+        return Strings.CS.removeEnd(str, suffix);
     }
 
     public static boolean containedByAny(String searchString, String... strings) {
@@ -187,7 +204,7 @@ public class StringUtils {
     }
 
     public static boolean contains(final CharSequence seq, final CharSequence searchSeq) {
-        return org.apache.commons.lang3.StringUtils.contains(seq, searchSeq);
+        return Strings.CS.contains(seq, searchSeq);
     }
 
     /**
@@ -198,23 +215,23 @@ public class StringUtils {
     }
 
     public static String randomNumeric(int length) {
-        return RandomStringUtils.randomNumeric(length);
+        return RandomStringUtils.secure().nextNumeric(length);
     }
 
     public static String random(int length) {
-        return RandomStringUtils.random(length);
+        return RandomStringUtils.secure().next(length);
     }
 
     public static String random(int length, String chars) {
-        return RandomStringUtils.random(length, chars);
+        return RandomStringUtils.secure().next(length, chars);
     }
 
     public static String randomAlphanumeric(int count) {
-        return RandomStringUtils.randomAlphanumeric(count);
+        return RandomStringUtils.secure().nextAlphanumeric(count);
     }
 
     public static String randomAlphabetic(int count) {
-        return RandomStringUtils.randomAlphabetic(count);
+        return RandomStringUtils.secure().nextAlphabetic(count);
     }
 
     public static String generateSafeToken(int length) {
@@ -226,6 +243,45 @@ public class StringUtils {
 
     public static String generateSafeToken() {
         return generateSafeToken(DEFAULT_TOKEN_LENGTH);
+    }
+
+    public static String truncate(String string, int maxLength) {
+        return truncate(string, maxLength, n -> "...[truncated " + n + " symbols]");
+    }
+
+    public static String truncate(String string, int maxLength, Function<Integer, String> truncationMarkerFunc) {
+        if (string == null || maxLength <= 0 || string.length() <= maxLength) {
+            return string;
+        }
+        int truncatedSymbols = string.length() - maxLength;
+        return string.substring(0, maxLength) + truncationMarkerFunc.apply(truncatedSymbols);
+    }
+
+    public static String toLowerCase(String string) {
+        return isNotEmpty(string) ? string.toLowerCase() : string;
+    }
+
+    public static List<String> splitByCommaWithoutQuotes(String value) {
+        List<String> splitValues = List.of(value.trim().split("\\s*,\\s*"));
+        List<String> result = new ArrayList<>();
+        char lastWayInputValue = '#';
+        for (String str : splitValues) {
+            char startWith = str.charAt(0);
+            char endWith = str.charAt(str.length() - 1);
+
+            // if first value is not quote, so we return values after split
+            if (startWith != '\'' && startWith != '"') return splitValues;
+
+            // if value is not in quote, so we return values after split
+            if (startWith != endWith) return splitValues;
+
+            // if different way values, so don't replace quote and return values after split
+            if (lastWayInputValue != '#' && startWith != lastWayInputValue) return splitValues;
+
+            result.add(str.substring(1, str.length() - 1));
+            lastWayInputValue = startWith;
+        }
+        return result;
     }
 
 }

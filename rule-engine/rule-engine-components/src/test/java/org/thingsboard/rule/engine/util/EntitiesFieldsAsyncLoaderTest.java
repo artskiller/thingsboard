@@ -1,18 +1,5 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-License-Identifier: Apache-2.0
 package org.thingsboard.rule.engine.util;
 
 import com.google.common.util.concurrent.Futures;
@@ -22,8 +9,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.thingsboard.common.util.DirectListeningExecutor;
 import org.thingsboard.common.util.ListeningExecutor;
-import org.thingsboard.rule.engine.TestDbCallbackExecutor;
 import org.thingsboard.rule.engine.api.RuleEngineAlarmService;
 import org.thingsboard.rule.engine.api.TbContext;
 import org.thingsboard.rule.engine.api.TbNodeException;
@@ -37,10 +24,12 @@ import org.thingsboard.server.common.data.Tenant;
 import org.thingsboard.server.common.data.User;
 import org.thingsboard.server.common.data.alarm.Alarm;
 import org.thingsboard.server.common.data.asset.Asset;
+import org.thingsboard.server.common.data.edge.Edge;
 import org.thingsboard.server.common.data.id.AlarmId;
 import org.thingsboard.server.common.data.id.AssetId;
 import org.thingsboard.server.common.data.id.CustomerId;
 import org.thingsboard.server.common.data.id.DeviceId;
+import org.thingsboard.server.common.data.id.EdgeId;
 import org.thingsboard.server.common.data.id.EntityId;
 import org.thingsboard.server.common.data.id.EntityIdFactory;
 import org.thingsboard.server.common.data.id.EntityViewId;
@@ -52,6 +41,7 @@ import org.thingsboard.server.common.data.rule.RuleChain;
 import org.thingsboard.server.dao.asset.AssetService;
 import org.thingsboard.server.dao.customer.CustomerService;
 import org.thingsboard.server.dao.device.DeviceService;
+import org.thingsboard.server.dao.edge.EdgeService;
 import org.thingsboard.server.dao.entityview.EntityViewService;
 import org.thingsboard.server.dao.rule.RuleChainService;
 import org.thingsboard.server.dao.tenant.TenantService;
@@ -73,7 +63,7 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 public class EntitiesFieldsAsyncLoaderTest {
 
-    private static final ListeningExecutor DB_EXECUTOR = new TestDbCallbackExecutor();
+    private static final ListeningExecutor DB_EXECUTOR = DirectListeningExecutor.INSTANCE;
     private static EnumSet<EntityType> SUPPORTED_ENTITY_TYPES;
     private static UUID RANDOM_UUID;
     private static TenantId TENANT_ID;
@@ -95,11 +85,13 @@ public class EntitiesFieldsAsyncLoaderTest {
     private RuleChainService ruleChainServiceMock;
     @Mock
     private EntityViewService entityViewServiceMock;
+    @Mock
+    private EdgeService edgeServiceMock;
 
     @BeforeAll
     public static void setup() {
         RANDOM_UUID = UUID.randomUUID();
-        TENANT_ID = new TenantId(UUID.randomUUID());
+        TENANT_ID = TenantId.fromUUID(UUID.randomUUID());
         SUPPORTED_ENTITY_TYPES = EnumSet.of(
                 EntityType.TENANT,
                 EntityType.CUSTOMER,
@@ -108,7 +100,8 @@ public class EntitiesFieldsAsyncLoaderTest {
                 EntityType.DEVICE,
                 EntityType.ALARM,
                 EntityType.RULE_CHAIN,
-                EntityType.ENTITY_VIEW
+                EntityType.ENTITY_VIEW,
+                EntityType.EDGE
         );
     }
 
@@ -166,7 +159,7 @@ public class EntitiesFieldsAsyncLoaderTest {
     private void initMocks(EntityType entityType, boolean entityDoesNotExist) {
         switch (entityType) {
             case TENANT:
-                var tenant = Futures.immediateFuture(entityDoesNotExist ? null : new Tenant(new TenantId(RANDOM_UUID)));
+                var tenant = Futures.immediateFuture(entityDoesNotExist ? null : new Tenant(TenantId.fromUUID(RANDOM_UUID)));
 
                 when(ctxMock.getDbCallbackExecutor()).thenReturn(DB_EXECUTOR);
                 when(ctxMock.getTenantService()).thenReturn(tenantServiceMock);
@@ -229,6 +222,14 @@ public class EntitiesFieldsAsyncLoaderTest {
                 doReturn(entityView).when(entityViewServiceMock).findEntityViewByIdAsync(eq(TENANT_ID), any());
 
                 break;
+            case EDGE:
+                var edge = Futures.immediateFuture(entityDoesNotExist ? null : new Edge(new EdgeId(RANDOM_UUID)));
+
+                when(ctxMock.getDbCallbackExecutor()).thenReturn(DB_EXECUTOR);
+                when(ctxMock.getEdgeService()).thenReturn(edgeServiceMock);
+                doReturn(edge).when(edgeServiceMock).findEdgeByIdAsync(eq(TENANT_ID), any());
+
+                break;
             default:
                 throw new RuntimeException("Unexpected EntityType: " + entityType);
         }
@@ -252,6 +253,8 @@ public class EntitiesFieldsAsyncLoaderTest {
                 return new RuleChain((RuleChainId) entityId);
             case ENTITY_VIEW:
                 return new EntityView((EntityViewId) entityId);
+            case EDGE:
+                return new Edge((EdgeId) entityId);
             default:
                 throw new RuntimeException("Unexpected EntityType: " + entityId.getEntityType());
         }

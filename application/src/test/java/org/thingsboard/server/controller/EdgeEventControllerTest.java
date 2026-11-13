@@ -1,21 +1,10 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
+// SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
 package org.thingsboard.server.controller;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 import org.awaitility.Awaitility;
 import org.junit.After;
@@ -24,18 +13,23 @@ import org.junit.Before;
 import org.junit.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.test.mock.mockito.SpyBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.context.TestPropertySource;
+import org.thingsboard.common.util.JacksonUtil;
+import org.thingsboard.server.common.data.AttributeScope;
 import org.thingsboard.server.common.data.Device;
+import org.thingsboard.server.common.data.EntityType;
 import org.thingsboard.server.common.data.asset.Asset;
 import org.thingsboard.server.common.data.edge.Edge;
 import org.thingsboard.server.common.data.edge.EdgeEvent;
 import org.thingsboard.server.common.data.edge.EdgeEventActionType;
 import org.thingsboard.server.common.data.edge.EdgeEventType;
+import org.thingsboard.server.common.data.group.EntityGroup;
 import org.thingsboard.server.common.data.id.EdgeId;
 import org.thingsboard.server.common.data.page.PageData;
 import org.thingsboard.server.common.data.page.TimePageLink;
 import org.thingsboard.server.common.data.relation.EntityRelation;
+import org.thingsboard.server.common.data.rule.RuleChain;
 import org.thingsboard.server.dao.edge.EdgeEventDao;
 import org.thingsboard.server.dao.service.DaoSqlTest;
 import org.thingsboard.server.dao.sqlts.insert.sql.SqlPartitioningRepository;
@@ -62,7 +56,7 @@ public class EdgeEventControllerTest extends AbstractControllerTest {
 
     @Autowired
     private EdgeEventDao edgeEventDao;
-    @SpyBean
+    @MockitoSpyBean
     private SqlPartitioningRepository partitioningRepository;
     @Autowired
     private EdgeEventsCleanUpService edgeEventsCleanUpService;
@@ -86,50 +80,61 @@ public class EdgeEventControllerTest extends AbstractControllerTest {
         Edge edge = constructEdge("TestEdge", "default");
         edge = doPost("/api/edge", edge, Edge.class);
 
-        Device device = constructDevice("TestDevice", "default");
-        Device savedDevice = doPost("/api/device", device, Device.class);
-
         final EdgeId edgeId = edge.getId();
-        doPost("/api/edge/" + edgeId.toString() + "/device/" + savedDevice.getId().toString(), Device.class);
 
-        Asset asset = constructAsset("TestAsset", "default");
-        Asset savedAsset = doPost("/api/asset", asset, Asset.class);
+        awaitForEdgeTemplateRootRuleChainToAssignToEdge(edgeId);
 
-        doPost("/api/edge/" + edgeId.toString() + "/asset/" + savedAsset.getId().toString(), Asset.class);
+        // simulate edge activation
+        ObjectNode attributes = JacksonUtil.newObjectNode();
+        attributes.put("active", true);
+        doPost("/api/plugins/telemetry/EDGE/" + edge.getId() + "/attributes/" + AttributeScope.SERVER_SCOPE, attributes);
 
-        EntityRelation relation = new EntityRelation(savedAsset.getId(), savedDevice.getId(), EntityRelation.CONTAINS_TYPE);
+        EntityGroup deviceEntityGroup = constructEntityGroup("TestDeviceGroup", EntityType.DEVICE);
+        EntityGroup savedDeviceEntityGroup = doPost("/api/entityGroup", deviceEntityGroup, EntityGroup.class);
+        doPost("/api/edge/" + edgeId.toString() + "/entityGroup/" + savedDeviceEntityGroup.getId().toString() + "/DEVICE", EntityGroup.class);
+        awaitForNumberOfEdgeEvents(edgeId, 1);
 
+        Device device = constructDevice("TestDevice", "default");
+        Device savedDevice =
+                doPost("/api/device?entityGroupId=" + savedDeviceEntityGroup.getId().getId().toString(), device, Device.class);
+        awaitForNumberOfEdgeEvents(edgeId, 2);
+
+        Device device2 = constructDevice("TestDevice2", "default");
+        doPost("/api/device?entityGroupId=" + savedDeviceEntityGroup.getId().getId().toString(), device2, Device.class);
         awaitForNumberOfEdgeEvents(edgeId, 3);
 
-        doPost("/api/relation", relation);
-
+        EntityGroup assetEntityGroup = constructEntityGroup("TestAssetGroup", EntityType.ASSET);
+        EntityGroup savedAssetEntityGroup = doPost("/api/entityGroup", assetEntityGroup, EntityGroup.class);
+        doPost("/api/edge/" + edgeId.toString() + "/entityGroup/" + savedAssetEntityGroup.getId().toString() + "/ASSET", EntityGroup.class);
         awaitForNumberOfEdgeEvents(edgeId, 4);
 
+        Asset asset = constructAsset("TestAsset", "default");
+        Asset savedAsset =
+                doPost("/api/asset?entityGroupId=" + savedAssetEntityGroup.getId().getId().toString(), asset, Asset.class);
+        awaitForNumberOfEdgeEvents(edgeId, 5);
+
+        Asset asset2 = constructAsset("TestAsset2", "default");
+        doPost("/api/asset?entityGroupId=" + savedAssetEntityGroup.getId().getId().toString(), asset2, Asset.class);
+        awaitForNumberOfEdgeEvents(edgeId, 6);
+
+        EntityRelation relation = new EntityRelation(savedAsset.getId(), savedDevice.getId(), EntityRelation.CONTAINS_TYPE);
+        doPost("/api/relation", relation);
+        awaitForNumberOfEdgeEvents(edgeId, 7);
+
         List<EdgeEvent> edgeEvents = findEdgeEvents(edgeId);
-        Assert.assertTrue(popEdgeEvent(edgeEvents, EdgeEventType.RULE_CHAIN)); // root rule chain
-        Assert.assertTrue(popEdgeEvent(edgeEvents, EdgeEventType.DEVICE)); // TestDevice
-        Assert.assertTrue(popEdgeEvent(edgeEvents, EdgeEventType.ASSET)); // TestAsset
-        Assert.assertTrue(popEdgeEvent(edgeEvents, EdgeEventType.RELATION));
+
+        Assert.assertTrue(popEdgeEvent(edgeEvents, EdgeEventType.ENTITY_GROUP, EdgeEventActionType.ASSIGNED_TO_EDGE)); // TestDeviceGroup
+
+        Assert.assertTrue(popEdgeEvent(edgeEvents, EdgeEventType.DEVICE, EdgeEventActionType.ADDED_TO_ENTITY_GROUP)); // TestDevice
+        Assert.assertTrue(popEdgeEvent(edgeEvents, EdgeEventType.DEVICE, EdgeEventActionType.ADDED_TO_ENTITY_GROUP)); // TestDevice2
+
+        Assert.assertTrue(popEdgeEvent(edgeEvents, EdgeEventType.ENTITY_GROUP, EdgeEventActionType.ASSIGNED_TO_EDGE)); // TestAssetGroup
+
+        Assert.assertTrue(popEdgeEvent(edgeEvents, EdgeEventType.ASSET, EdgeEventActionType.ADDED_TO_ENTITY_GROUP)); // TestAsset
+        Assert.assertTrue(popEdgeEvent(edgeEvents, EdgeEventType.ASSET, EdgeEventActionType.ADDED_TO_ENTITY_GROUP)); // TestAsset2
+
+        Assert.assertTrue(popEdgeEvent(edgeEvents, EdgeEventType.RELATION, EdgeEventActionType.RELATION_ADD_OR_UPDATE));
         Assert.assertTrue(edgeEvents.isEmpty());
-    }
-
-    private boolean popEdgeEvent(List<EdgeEvent> edgeEvents, EdgeEventType edgeEventType) {
-        for (EdgeEvent edgeEvent : edgeEvents) {
-            if (edgeEventType.equals(edgeEvent.getType())) {
-                edgeEvents.remove(edgeEvent);
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private void awaitForNumberOfEdgeEvents(EdgeId edgeId, int expectedNumber) {
-        Awaitility.await()
-                .atMost(30, TimeUnit.SECONDS)
-                .until(() -> {
-                    List<EdgeEvent> edgeEvents = findEdgeEvents(edgeId);
-                    return edgeEvents.size() == expectedNumber;
-                });
     }
 
     @Test
@@ -160,9 +165,53 @@ public class EdgeEventControllerTest extends AbstractControllerTest {
         });
     }
 
+    private void awaitForNumberOfEdgeEvents(EdgeId edgeId, int expectedNumber) {
+        Awaitility.await()
+                .atMost(TIMEOUT, TimeUnit.SECONDS)
+                .until(() -> {
+                    List<EdgeEvent> edgeEvents = findEdgeEvents(edgeId);
+                    return edgeEvents.size() == expectedNumber;
+                });
+    }
+
+    private boolean popEdgeEvent(List<EdgeEvent> edgeEvents, EdgeEventType edgeEventType, EdgeEventActionType actionType) {
+        for (EdgeEvent edgeEvent : edgeEvents) {
+            if (edgeEventType.equals(edgeEvent.getType())) {
+                if (actionType != null && !actionType.equals(edgeEvent.getAction())) {
+                    continue;
+                }
+                edgeEvents.remove(edgeEvent);
+                return true;
+            }
+        }
+        return false;
+    }
+
     private List<EdgeEvent> findEdgeEvents(EdgeId edgeId) throws Exception {
-        return doGetTypedWithTimePageLink("/api/edge/" + edgeId.toString() + "/events?",
+        return doGetTypedWithTimePageLink("/api/edge/" + edgeId + "/events?",
                 new TypeReference<PageData<EdgeEvent>>() {
+                }, new TimePageLink(10)).getData();
+    }
+
+    private EntityGroup constructEntityGroup(String name, EntityType type) {
+        EntityGroup result = new EntityGroup();
+        result.setName(name);
+        result.setType(type);
+        return result;
+    }
+
+    private void awaitForEdgeTemplateRootRuleChainToAssignToEdge(EdgeId edgeId) {
+        Awaitility.await()
+                .atMost(TIMEOUT, TimeUnit.SECONDS)
+                .until(() -> {
+                    List<RuleChain> ruleChains = getEdgeRuleChains(edgeId);
+                    return ruleChains.size() == 1;
+                });
+    }
+
+    private List<RuleChain> getEdgeRuleChains(EdgeId edgeId) throws Exception {
+        return doGetTypedWithTimePageLink("/api/edge/" + edgeId + "/ruleChains?",
+                new TypeReference<PageData<RuleChain>>() {
                 }, new TimePageLink(10)).getData();
     }
 
@@ -194,5 +243,4 @@ public class EdgeEventControllerTest extends AbstractControllerTest {
         }
         return edgeEvent;
     }
-
 }

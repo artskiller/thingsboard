@@ -1,44 +1,42 @@
-///
-/// Copyright © 2016-2023 The Thingsboard Authors
-///
-/// Licensed under the Apache License, Version 2.0 (the "License");
-/// you may not use this file except in compliance with the License.
-/// You may obtain a copy of the License at
-///
-///     http://www.apache.org/licenses/LICENSE-2.0
-///
-/// Unless required by applicable law or agreed to in writing, software
-/// distributed under the License is distributed on an "AS IS" BASIS,
-/// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-/// See the License for the specific language governing permissions and
-/// limitations under the License.
-///
-
-import { Component } from '@angular/core';
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-License-Identifier: Apache-2.0
+import { Component, DestroyRef } from '@angular/core';
 import { Store } from '@ngrx/store';
 import { AppState } from '@core/core.state';
 import { PageComponent } from '@shared/components/page.component';
 import { Router } from '@angular/router';
-import { UntypedFormBuilder, UntypedFormControl, UntypedFormGroup, Validators } from '@angular/forms';
+import {
+  AbstractControl,
+  UntypedFormBuilder,
+  UntypedFormControl,
+  UntypedFormGroup,
+  ValidationErrors,
+  ValidatorFn,
+  Validators
+} from '@angular/forms';
 import { JwtSettings, SecuritySettings } from '@shared/models/settings.models';
 import { AdminService } from '@core/http/admin.service';
 import { HasConfirmForm } from '@core/guards/confirm-on-exit.guard';
 import { mergeMap, tap } from 'rxjs/operators';
-import { randomAlphanumeric } from '@core/utils';
+import { randomAlphanumeric, validateEmail } from '@core/utils';
 import { AuthService } from '@core/auth/auth.service';
 import { DialogService } from '@core/services/dialog.service';
 import { TranslateService } from '@ngx-translate/core';
 import { Observable, of } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 @Component({
-  selector: 'tb-security-settings',
-  templateUrl: './security-settings.component.html',
-  styleUrls: ['./security-settings.component.scss', './settings-card.scss']
+    selector: 'tb-security-settings',
+    templateUrl: './security-settings.component.html',
+    styleUrls: ['./security-settings.component.scss', './settings-card.scss'],
+    standalone: false
 })
 export class SecuritySettingsComponent extends PageComponent implements HasConfirmForm {
 
   securitySettingsFormGroup: UntypedFormGroup;
   jwtSecuritySettingsFormGroup: UntypedFormGroup;
+
+  showMainLoadingBar = false;
 
   private securitySettings: SecuritySettings;
   private jwtSettings: JwtSettings;
@@ -49,7 +47,8 @@ export class SecuritySettingsComponent extends PageComponent implements HasConfi
               private authService: AuthService,
               private dialogService: DialogService,
               private translate: TranslateService,
-              private fb: UntypedFormBuilder) {
+              private fb: UntypedFormBuilder,
+              private destroyRef: DestroyRef) {
     super(store);
     this.buildSecuritySettingsForm();
     this.buildJwtSecuritySettingsForm();
@@ -64,17 +63,22 @@ export class SecuritySettingsComponent extends PageComponent implements HasConfi
   buildSecuritySettingsForm() {
     this.securitySettingsFormGroup = this.fb.group({
       maxFailedLoginAttempts: [null, [Validators.min(0)]],
-      userLockoutNotificationEmail: ['', []],
+      userLockoutNotificationEmail: ['', [validateEmail]],
+      userActivationTokenTtl: [24, [Validators.required, Validators.min(1), Validators.max(24)]],
+      passwordResetTokenTtl: [24, [Validators.required, Validators.min(1), Validators.max(24)]],
+      mobileSecretKeyLength: [null, [Validators.min(1)]],
       passwordPolicy: this.fb.group(
         {
-          minimumLength: [null, [Validators.required, Validators.min(5), Validators.max(50)]],
+          minimumLength: [null, [Validators.required, Validators.min(6), Validators.max(50)]],
+          maximumLength: [null, [Validators.min(6), this.maxPasswordValidation()]],
           minimumUppercaseLetters: [null, Validators.min(0)],
           minimumLowercaseLetters: [null, Validators.min(0)],
           minimumDigits: [null, Validators.min(0)],
           minimumSpecialCharacters: [null, Validators.min(0)],
           passwordExpirationPeriodDays: [null, Validators.min(0)],
           passwordReuseFrequencyDays: [null, Validators.min(0)],
-          allowWhitespaces: [true]
+          allowWhitespaces: [true],
+          forceUserToResetPasswordIfNotValid: [false]
         }
       )
     });
@@ -84,10 +88,12 @@ export class SecuritySettingsComponent extends PageComponent implements HasConfi
     this.jwtSecuritySettingsFormGroup = this.fb.group({
       tokenIssuer: ['', Validators.required],
       tokenSigningKey: ['', [Validators.required, this.base64Format]],
-      tokenExpirationTime: [0, [Validators.required, Validators.pattern('[0-9]*'), Validators.min(60)]],
-      refreshTokenExpTime: [0, [Validators.required, Validators.pattern('[0-9]*'), Validators.min(900)]]
+      tokenExpirationTime: [0, [Validators.required, Validators.min(60), Validators.max(2147483647)]],
+      refreshTokenExpTime: [0, [Validators.required, Validators.min(900), Validators.max(2147483647)]]
     }, {validators: this.refreshTokenTimeGreatTokenTime.bind(this)});
-    this.jwtSecuritySettingsFormGroup.get('tokenExpirationTime').valueChanges.subscribe(
+    this.jwtSecuritySettingsFormGroup.get('tokenExpirationTime').valueChanges.pipe(
+      takeUntilDestroyed(this.destroyRef)
+    ).subscribe(
       () => this.jwtSecuritySettingsFormGroup.get('refreshTokenExpTime').updateValueAndValidity({onlySelf: true})
     );
   }
@@ -111,6 +117,18 @@ export class SecuritySettingsComponent extends PageComponent implements HasConfi
       }
       return of(null);
     })).subscribe(() => {});
+  }
+
+  private maxPasswordValidation(): ValidatorFn {
+    return (control: AbstractControl): ValidationErrors | null => {
+      const value: string = control.value;
+      if (value) {
+        if (value < control.parent.value?.minimumLength) {
+          return {lessMin: true};
+        }
+      }
+      return null;
+    };
   }
 
   discardSetting() {
@@ -177,7 +195,7 @@ export class SecuritySettingsComponent extends PageComponent implements HasConfi
     }
     try {
       const value = atob(control.value);
-      if (value.length < 32) {
+      if (value.length < 64) {
         return {minLength: true};
       }
       return null;
@@ -189,5 +207,4 @@ export class SecuritySettingsComponent extends PageComponent implements HasConfi
   confirmForm(): UntypedFormGroup {
     return this.securitySettingsFormGroup.dirty ? this.securitySettingsFormGroup : this.jwtSecuritySettingsFormGroup;
   }
-
 }

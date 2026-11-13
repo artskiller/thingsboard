@@ -1,20 +1,8 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-License-Identifier: Apache-2.0
 package org.thingsboard.rule.engine.deduplication;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
@@ -40,33 +28,38 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
+import static org.thingsboard.server.common.data.DataConstants.QUEUE_NAME;
+
+@Slf4j
 @RuleNode(
         type = ComponentType.TRANSFORMATION,
         name = "deduplication",
         configClazz = TbMsgDeduplicationNodeConfiguration.class,
+        version = 1,
+        hasQueueName = true,
         nodeDescription = "Deduplicate messages within the same originator entity for a configurable period " +
                 "based on a specified deduplication strategy.",
-        nodeDetails = "Rule node allows you to select one of the following strategy to deduplicate messages: <br></br>" +
-                "<b>FIRST</b> - return first message that arrived during deduplication period.<br></br>" +
-                "<b>LAST</b> - return last message that arrived during deduplication period.<br></br>" +
-                "<b>ALL</b> - return all messages as a single JSON array message. " +
-                "Where each element represents object with <b>msg</b> and <b>metadata</b> inner properties.<br></br>",
+        nodeDetails = "Deduplication strategies: <ul><li><strong>FIRST</strong> - return first message that arrived during deduplication period.</li>" +
+                "<li><strong>LAST</strong> - return last message that arrived during deduplication period.</li>" +
+                "<li><strong>ALL</strong> - return all messages as a single JSON array message. " +
+                "Where each element represents object with <strong><i>msg</i></strong> and <strong><i>metadata</i></strong> inner properties.</li></ul>",
         icon = "content_copy",
-        uiResources = {"static/rulenode/rulenode-core-config.js"},
-        configDirective = "tbActionNodeMsgDeduplicationConfig"
+        configDirective = "tbTransformationNodeDeduplicationConfig",
+        docUrl = "https://thingsboard.io/docs/user-guide/rule-engine-2-0/nodes/transformation/deduplication/"
 )
-@Slf4j
 public class TbMsgDeduplicationNode implements TbNode {
 
-    public static final int TB_MSG_DEDUPLICATION_RETRY_DELAY = 10;
+    public static final long TB_MSG_DEDUPLICATION_RETRY_DELAY = 10L;
 
     private TbMsgDeduplicationNodeConfiguration config;
 
     private final Map<EntityId, DeduplicationData> deduplicationMap;
     private long deduplicationInterval;
+    private String queueName;
 
     public TbMsgDeduplicationNode() {
         this.deduplicationMap = new HashMap<>();
@@ -76,6 +69,7 @@ public class TbMsgDeduplicationNode implements TbNode {
     public void init(TbContext ctx, TbNodeConfiguration configuration) throws TbNodeException {
         this.config = TbNodeUtils.convert(configuration, TbMsgDeduplicationNodeConfiguration.class);
         this.deduplicationInterval = TimeUnit.SECONDS.toMillis(config.getInterval());
+        this.queueName = ctx.getQueueName();
     }
 
     @Override
@@ -90,6 +84,22 @@ public class TbMsgDeduplicationNode implements TbNode {
     @Override
     public void destroy() {
         deduplicationMap.clear();
+    }
+
+    @Override
+    public TbPair<Boolean, JsonNode> upgrade(int fromVersion, JsonNode oldConfiguration) throws TbNodeException {
+        boolean hasChanges = false;
+        switch (fromVersion) {
+            case 0:
+                if (oldConfiguration.has(QUEUE_NAME)) {
+                    hasChanges = true;
+                    ((ObjectNode) oldConfiguration).remove(QUEUE_NAME);
+                }
+                break;
+            default:
+                break;
+        }
+        return new TbPair<>(hasChanges, oldConfiguration);
     }
 
     private void processOnRegularMsg(TbContext ctx, TbMsg msg) {
@@ -132,12 +142,13 @@ public class TbMsgDeduplicationNode implements TbNode {
                             iterator.remove();
                         }
                     }
-                    deduplicationResults.add(TbMsg.newMsg(
-                            config.getQueueName(),
-                            config.getOutMsgType(),
-                            deduplicationId,
-                            getMetadata(),
-                            getMergedData(pack)));
+                    deduplicationResults.add(TbMsg.newMsg()
+                            .queueName(queueName)
+                            .type(config.getOutMsgType())
+                            .originator(deduplicationId)
+                            .copyMetaData(getMetadata())
+                            .data(getMergedData(pack))
+                            .build());
                 } else {
                     TbMsg resultMsg = null;
                     boolean searchMin = DeduplicationStrategy.FIRST.equals(config.getStrategy());
@@ -154,13 +165,11 @@ public class TbMsgDeduplicationNode implements TbNode {
                         }
                     }
                     if (resultMsg != null) {
-                        deduplicationResults.add(TbMsg.newMsg(
-                                resultMsg.getQueueName(),
-                                resultMsg.getType(),
-                                resultMsg.getOriginator(),
-                                resultMsg.getCustomerId(),
-                                resultMsg.getMetaData(),
-                                resultMsg.getData()));
+                        var msgBuilder = resultMsg.copyWithNewCtx().id(UUID.randomUUID());
+                        if (queueName != null) {
+                            msgBuilder.queueName(queueName);
+                        }
+                        deduplicationResults.add(msgBuilder.build());
                     }
                 }
                 packBoundsOpt = findValidPack(msgList, deduplicationTimeoutMs);
@@ -193,16 +202,17 @@ public class TbMsgDeduplicationNode implements TbNode {
     }
 
     private void enqueueForTellNextWithRetry(TbContext ctx, TbMsg msg, int retryAttempt) {
-        if (config.getMaxRetries() > retryAttempt) {
+        if (retryAttempt <= config.getMaxRetries()) {
             ctx.enqueueForTellNext(msg, TbNodeConnectionType.SUCCESS,
-                    () -> {
-                        log.trace("[{}][{}][{}] Successfully enqueue deduplication result message!", ctx.getSelfId(), msg.getOriginator(), retryAttempt);
-                    },
+                    () -> log.trace("[{}][{}][{}] Successfully enqueue deduplication result message!", ctx.getSelfId(), msg.getOriginator(), retryAttempt),
                     throwable -> {
                         log.trace("[{}][{}][{}] Failed to enqueue deduplication output message due to: ", ctx.getSelfId(), msg.getOriginator(), retryAttempt, throwable);
-                        ctx.schedule(() -> {
-                            enqueueForTellNextWithRetry(ctx, msg, retryAttempt + 1);
-                        }, TB_MSG_DEDUPLICATION_RETRY_DELAY, TimeUnit.SECONDS);
+                        if (retryAttempt < config.getMaxRetries()) {
+                            ctx.schedule(() -> enqueueForTellNextWithRetry(ctx, msg, retryAttempt + 1), TB_MSG_DEDUPLICATION_RETRY_DELAY, TimeUnit.SECONDS);
+                        } else {
+                            log.trace("[{}][{}] Max retries [{}] exhausted. Dropping deduplication result message [{}]",
+                                    ctx.getSelfId(), msg.getOriginator(), config.getMaxRetries(), msg.getId());
+                        }
                     });
         }
     }

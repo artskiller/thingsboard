@@ -1,0 +1,57 @@
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
+// SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
+:host {
+  .tb-template-header {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    padding-bottom: 12px;
+    background-color: var(--mat-dialog-container-color, white);
+
+    .tb-form-hint {
+      .content {
+        vertical-align: middle;
+      }
+    }
+  }
+
+  .template-tittle {
+    gap: 12px;
+    font-weight: normal;
+
+    tb-icon {
+      color: rgba(0, 0, 0, .38);
+    }
+  }
+
+  .tb-mat-error {
+    font-size: 13px;
+  }
+
+  .tb-title {
+    font-size: 16px;
+    line-height: 24px;
+
+    &.tb-required::after {
+      font-size: initial;
+      content: "*";
+    }
+
+    &.tb-error {
+      color: var(--mat-theme-error, #f44336);
+
+      &.tb-required::after {
+        color: var(--mat-theme-error, #f44336);
+      }
+    }
+  }
+}
+
+:host ::ng-deep {
+  .tb-form-panel .mat-expansion-panel.tb-settings {
+    .mat-expansion-panel-content > .mat-expansion-panel-body {
+      gap: 0;
+    }
+  }
+}

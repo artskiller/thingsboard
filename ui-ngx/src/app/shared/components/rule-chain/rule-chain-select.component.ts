@@ -1,45 +1,31 @@
-///
-/// Copyright © 2016-2023 The Thingsboard Authors
-///
-/// Licensed under the Apache License, Version 2.0 (the "License");
-/// you may not use this file except in compliance with the License.
-/// You may obtain a copy of the License at
-///
-///     http://www.apache.org/licenses/LICENSE-2.0
-///
-/// Unless required by applicable law or agreed to in writing, software
-/// distributed under the License is distributed on an "AS IS" BASIS,
-/// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-/// See the License for the specific language governing permissions and
-/// limitations under the License.
-///
-
-import { Component, forwardRef, Input, OnInit } from '@angular/core';
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-License-Identifier: Apache-2.0
+import { Component, forwardRef, Injector, Input, StaticProvider, ViewContainerRef } from '@angular/core';
 import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
-import { Observable } from 'rxjs';
-import { PageLink } from '@shared/models/page/page-link';
-import { map, share } from 'rxjs/operators';
-import { PageData } from '@shared/models/page/page-data';
-import { Store } from '@ngrx/store';
-import { AppState } from '@app/core/core.state';
 import { TooltipPosition } from '@angular/material/tooltip';
 import { RuleChain, RuleChainType } from '@shared/models/rule-chain.models';
-import { RuleChainService } from '@core/http/rule-chain.service';
 import { isDefinedAndNotNull } from '@core/utils';
 import { coerceBoolean } from '@shared/decorators/coercion';
-import { Direction } from '@shared/models/page/sort-order';
+import { Overlay, OverlayConfig, OverlayRef } from '@angular/cdk/overlay';
+import {
+  RULE_CHAIN_SELECT_PANEL_DATA, RuleChainSelectPanelComponent,
+  RuleChainSelectPanelData
+} from '@shared/components/rule-chain/rule-chain-select-panel.component';
+import { ComponentPortal } from '@angular/cdk/portal';
+import { POSITION_MAP } from '@shared/models/overlay.models';
 
 @Component({
-  selector: 'tb-rule-chain-select',
-  templateUrl: './rule-chain-select.component.html',
-  styleUrls: ['./rule-chain-select.component.scss'],
-  providers: [{
-    provide: NG_VALUE_ACCESSOR,
-    useExisting: forwardRef(() => RuleChainSelectComponent),
-    multi: true
-  }]
+    selector: 'tb-rule-chain-select',
+    templateUrl: './rule-chain-select.component.html',
+    styleUrls: ['./rule-chain-select.component.scss'],
+    providers: [{
+            provide: NG_VALUE_ACCESSOR,
+            useExisting: forwardRef(() => RuleChainSelectComponent),
+            multi: true
+        }],
+    standalone: false
 })
-export class RuleChainSelectComponent implements ControlValueAccessor, OnInit {
+export class RuleChainSelectComponent implements ControlValueAccessor {
 
   @Input()
   tooltipPosition: TooltipPosition = 'above';
@@ -55,25 +41,14 @@ export class RuleChainSelectComponent implements ControlValueAccessor, OnInit {
   @Input()
   ruleChainType: RuleChainType = RuleChainType.CORE;
 
-  ruleChains$: Observable<Array<RuleChain>>;
+  ruleChain: RuleChain | null;
 
-  ruleChainId: string | null;
+  panelOpened = false;
 
   private propagateChange = (v: any) => { };
 
-  constructor(private ruleChainService: RuleChainService) {
-  }
-
-  ngOnInit() {
-    const pageLink = new PageLink(100, 0, null, {
-      property: 'name',
-      direction: Direction.ASC
-    });
-
-    this.ruleChains$ = this.getRuleChains(pageLink).pipe(
-      map((pageData) => pageData.data),
-      share()
-    );
+  constructor(private overlay: Overlay,
+              private viewContainerRef: ViewContainerRef) {
   }
 
   registerOnChange(fn: any): void {
@@ -83,14 +58,13 @@ export class RuleChainSelectComponent implements ControlValueAccessor, OnInit {
   registerOnTouched(fn: any): void {
   }
 
-
   setDisabledState(isDisabled: boolean): void {
     this.disabled = isDisabled;
   }
 
-  writeValue(value: string | null): void {
+  writeValue(value: RuleChain): void {
     if (isDefinedAndNotNull(value)) {
-      this.ruleChainId = value;
+      this.ruleChain = value;
     }
   }
 
@@ -98,12 +72,54 @@ export class RuleChainSelectComponent implements ControlValueAccessor, OnInit {
     this.updateView();
   }
 
-  private updateView() {
-    this.propagateChange(this.ruleChainId);
+  openRuleChainSelectPanel($event: Event) {
+    if ($event) {
+      $event.stopPropagation();
+    }
+    if (!this.disabled) {
+      const target = $event.currentTarget;
+      const config = new OverlayConfig({
+        panelClass: 'tb-filter-panel',
+        backdropClass: 'cdk-overlay-transparent-backdrop',
+        hasBackdrop: true,
+        width: (target as HTMLElement).offsetWidth
+      });
+      config.positionStrategy = this.overlay.position()
+        .flexibleConnectedTo(target as HTMLElement)
+        .withPositions([POSITION_MAP.bottom]);
+      const overlayRef = this.overlay.create(config);
+      overlayRef.backdropClick().subscribe(() => {
+        overlayRef.dispose();
+      });
+      const providers: StaticProvider[] = [
+        {
+          provide: RULE_CHAIN_SELECT_PANEL_DATA,
+          useValue: {
+            ruleChainId: this.ruleChain.id?.id,
+            ruleChainType: this.ruleChainType
+          } as RuleChainSelectPanelData
+        },
+        {
+          provide: OverlayRef,
+          useValue: overlayRef
+        }
+      ];
+      const injector = Injector.create({parent: this.viewContainerRef.injector, providers});
+      const componentRef = overlayRef.attach(new ComponentPortal(RuleChainSelectPanelComponent,
+        this.viewContainerRef, injector));
+      this.panelOpened = true;
+      componentRef.onDestroy(() => {
+        this.panelOpened = false;
+        if (componentRef.instance.ruleChainSelected) {
+          this.ruleChain = componentRef.instance.result;
+          this.updateView();
+        }
+      });
+    }
   }
 
-  private getRuleChains(pageLink: PageLink): Observable<PageData<RuleChain>> {
-    return this.ruleChainService.getRuleChains(pageLink, this.ruleChainType, {ignoreLoading: true});
+  private updateView() {
+    this.propagateChange(this.ruleChain);
   }
 
 }

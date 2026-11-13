@@ -1,21 +1,11 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
+// SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
 package org.thingsboard.server.cache;
 
 import lombok.Data;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.cache.CacheManager;
@@ -31,10 +21,25 @@ import org.springframework.data.redis.connection.jedis.JedisConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.format.support.DefaultFormattingConversionService;
 import org.springframework.util.Assert;
+import org.thingsboard.common.util.SslUtil;
 import org.thingsboard.server.common.data.StringUtils;
 import org.thingsboard.server.common.data.id.EntityId;
 import redis.clients.jedis.JedisPoolConfig;
 
+import javax.net.ssl.KeyManagerFactory;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLSocketFactory;
+import javax.net.ssl.TrustManagerFactory;
+import java.io.IOException;
+import java.security.KeyStore;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
+import java.security.PrivateKey;
+import java.security.cert.CertPath;
+import java.security.cert.Certificate;
+import java.security.cert.CertificateException;
+import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -44,6 +49,7 @@ import java.util.List;
 @ConditionalOnProperty(prefix = "cache", value = "type", havingValue = "redis")
 @EnableCaching
 @Data
+@Slf4j
 public abstract class TBRedisCacheConfiguration {
 
     private static final String COMMA = ",";
@@ -51,6 +57,16 @@ public abstract class TBRedisCacheConfiguration {
 
     @Value("${redis.evictTtlInMs:60000}")
     private int evictTtlInMs;
+
+    /**
+     * Optional prefix prepended to every Redis cache key. Empty by default, so production keyspaces are
+     * unchanged. It lets several application contexts that point at different databases but share one Redis
+     * (notably the DAO test suites, where plain-Postgres and Citus {@code *ServiceSqlTest} classes run in one
+     * JVM against one Redis) keep their cache keyspaces separate. Unlike {@code redis.db}, a key prefix also
+     * works in Redis Cluster mode, where only logical database 0 exists.
+     */
+    @Value("${cache.key_prefix:}")
+    private String keyPrefix;
 
     @Value("${redis.pool_config.maxTotal:128}")
     private int maxTotal;
@@ -61,10 +77,10 @@ public abstract class TBRedisCacheConfiguration {
     @Value("${redis.pool_config.minIdle:16}")
     private int minIdle;
 
-    @Value("${redis.pool_config.testOnBorrow:true}")
+    @Value("${redis.pool_config.testOnBorrow:false}")
     private boolean testOnBorrow;
 
-    @Value("${redis.pool_config.testOnReturn:true}")
+    @Value("${redis.pool_config.testOnReturn:false}")
     private boolean testOnReturn;
 
     @Value("${redis.pool_config.testWhileIdle:true}")
@@ -85,10 +101,16 @@ public abstract class TBRedisCacheConfiguration {
     @Value("${redis.pool_config.blockWhenExhausted:true}")
     private boolean blockWhenExhausted;
 
+    @Value("${redis.ssl.enabled:false}")
+    private boolean sslEnabled;
+
     @Bean
     public RedisConnectionFactory redisConnectionFactory() {
         return loadFactory();
     }
+
+    @Autowired
+    private RedisSslCredentials redisSslCredentials;
 
     protected abstract JedisConnectionFactory loadFactory();
 
@@ -101,7 +123,11 @@ public abstract class TBRedisCacheConfiguration {
         DefaultFormattingConversionService redisConversionService = new DefaultFormattingConversionService();
         RedisCacheConfiguration.registerDefaultConverters(redisConversionService);
         registerDefaultConverters(redisConversionService);
-        RedisCacheConfiguration configuration = RedisCacheConfiguration.defaultCacheConfig().withConversionService(redisConversionService);
+        RedisCacheConfiguration configuration = RedisCacheConfiguration.defaultCacheConfig().withConversionService(redisConversionService)
+                // Spring-managed @Cacheable caches must honor the configured key prefix too, otherwise fixed-key
+                // caches (e.g. security settings) collide across environments sharing one Redis. With the empty
+                // default this yields exactly the standard 'cacheName::key' layout.
+                .prefixCacheNameWith(keyPrefix);
         return RedisCacheManager.builder(cf).cacheDefaults(configuration)
                 .transactionAware()
                 .build();
@@ -148,5 +174,60 @@ public abstract class TBRedisCacheConfiguration {
             }
         }
         return result;
+    }
+
+    protected SSLSocketFactory createSslSocketFactory() {
+        try {
+            SSLContext sslContext = SSLContext.getInstance("TLS");
+            KeyManagerFactory keyManagerFactory = createAndInitKeyManagerFactory();
+            TrustManagerFactory trustManagerFactory = createAndInitTrustManagerFactory();
+            sslContext.init(keyManagerFactory == null ? null : keyManagerFactory.getKeyManagers(), trustManagerFactory.getTrustManagers(), null);
+            return sslContext.getSocketFactory();
+        } catch (Exception e) {
+            throw new RuntimeException("Creating TLS factory failed!", e);
+        }
+    }
+
+    private TrustManagerFactory createAndInitTrustManagerFactory() throws Exception {
+            List<X509Certificate> caCerts = SslUtil.readCertFileByPath(redisSslCredentials.getCertFile());
+            KeyStore caKeyStore = KeyStore.getInstance(KeyStore.getDefaultType());
+            caKeyStore.load(null, null);
+            for (X509Certificate caCert : caCerts) {
+                caKeyStore.setCertificateEntry("redis-caCert-cert-" + caCert.getSubjectX500Principal().getName(), caCert);
+            }
+
+            TrustManagerFactory trustManagerFactory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+            trustManagerFactory.init(caKeyStore);
+            return trustManagerFactory;
+    }
+
+    private KeyManagerFactory createAndInitKeyManagerFactory() throws Exception {
+        KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+        kmf.init(loadKeyStore(), null);
+        return kmf;
+    }
+
+    private KeyStore loadKeyStore() throws KeyStoreException, IOException, NoSuchAlgorithmException, CertificateException {
+        if (redisSslCredentials.getUserCertFile().isBlank() || redisSslCredentials.getUserKeyFile().isBlank()) {
+            return null;
+        }
+        List<X509Certificate> certificates = SslUtil.readCertFileByPath(redisSslCredentials.getCertFile());
+        PrivateKey privateKey = SslUtil.readPrivateKeyByFilePath(redisSslCredentials.getUserKeyFile(), null);
+
+        KeyStore keyStore = KeyStore.getInstance(KeyStore.getDefaultType());
+        keyStore.load(null);
+        List<X509Certificate> unique = certificates.stream().distinct().toList();
+        for (X509Certificate cert : unique) {
+            keyStore.setCertificateEntry("redis-cert" + cert.getSubjectX500Principal().getName(), cert);
+        }
+
+        if (privateKey != null) {
+            CertificateFactory factory = CertificateFactory.getInstance("X.509");
+            CertPath certPath = factory.generateCertPath(certificates);
+            List<? extends Certificate> path = certPath.getCertificates();
+            Certificate[] x509Certificates = path.toArray(new Certificate[0]);
+            keyStore.setKeyEntry("redis-private-key", privateKey, null, x509Certificates);
+        }
+        return keyStore;
     }
 }

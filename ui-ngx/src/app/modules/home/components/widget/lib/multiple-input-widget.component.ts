@@ -1,19 +1,5 @@
-///
-/// Copyright © 2016-2023 The Thingsboard Authors
-///
-/// Licensed under the Apache License, Version 2.0 (the "License");
-/// you may not use this file except in compliance with the License.
-/// You may obtain a copy of the License at
-///
-///     http://www.apache.org/licenses/LICENSE-2.0
-///
-/// Unless required by applicable law or agreed to in writing, software
-/// distributed under the License is distributed on an "AS IS" BASIS,
-/// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-/// See the License for the specific language governing permissions and
-/// limitations under the License.
-///
-
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-License-Identifier: Apache-2.0
 import { Component, ElementRef, Input, NgZone, OnDestroy, OnInit, ViewChild, ViewContainerRef } from '@angular/core';
 import { PageComponent } from '@shared/components/page.component';
 import { WidgetContext } from '@home/models/widget-component.models';
@@ -33,14 +19,13 @@ import {
   isUndefined
 } from '@core/utils';
 import { EntityType } from '@shared/models/entity-type.models';
-import * as _moment from 'moment';
+import _moment from 'moment';
 import { UntypedFormBuilder, UntypedFormGroup, ValidatorFn, Validators } from '@angular/forms';
 import { RequestConfig } from '@core/http/http-utils';
 import { AttributeService } from '@core/http/attribute.service';
 import { AttributeData, AttributeScope, LatestTelemetry } from '@shared/models/telemetry/telemetry.models';
 import { forkJoin, Observable, Subject } from 'rxjs';
 import { EntityId } from '@shared/models/id/entity-id';
-import { ResizeObserver } from '@juggle/resize-observer';
 import { takeUntil } from 'rxjs/operators';
 import {
   JsonObjectEditDialogComponent,
@@ -55,7 +40,7 @@ type FieldAlignment = 'row' | 'column';
 type MultipleInputWidgetDataKeyType = 'server' | 'shared' | 'timeseries';
 export type MultipleInputWidgetDataKeyValueType = 'string' | 'double' | 'integer' |
                                                   'JSON' | 'booleanCheckbox' | 'booleanSwitch' |
-                                                  'dateTime' | 'date' | 'time' | 'select' | 'color';
+                                                  'dateTime' | 'date' | 'time' | 'select' | 'radio' | 'color';
 export type MultipleInputWidgetDataKeyEditableType = 'editable' | 'disabled' | 'readonly';
 
 type ConvertGetValueFunction = (value: any, ctx: WidgetContext) => any;
@@ -87,6 +72,9 @@ interface MultipleInputWidgetDataKeySettings {
   dataKeyValueType: MultipleInputWidgetDataKeyValueType;
   slideToggleLabelPosition?: 'after' | 'before';
   selectOptions: MultipleInputWidgetSelectOption[];
+  radioColor: string;
+  radioColumns: number;
+  radioLabelPosition?: 'after' | 'before';
   required: boolean;
   isEditable: MultipleInputWidgetDataKeyEditableType;
   disabledOnDataKey: string;
@@ -103,8 +91,8 @@ interface MultipleInputWidgetDataKeySettings {
   invalidJsonErrorMessage?: string;
   useCustomIcon: boolean;
   icon: string;
-  customIcon: string ;
-  safeCustomIcon?: SafeUrl;
+  customIcon: string;
+  customIconUrl?: string;
   inputTypeNumber?: boolean;
   readOnly?: boolean;
   disabledOnCondition?: boolean;
@@ -132,9 +120,10 @@ interface MultipleInputWidgetSource {
 }
 
 @Component({
-  selector: 'tb-multiple-input-widget ',
-  templateUrl: './multiple-input-widget.component.html',
-  styleUrls: ['./multiple-input-widget.component.scss']
+    selector: 'tb-multiple-input-widget ',
+    templateUrl: './multiple-input-widget.component.html',
+    styleUrls: ['./multiple-input-widget.component.scss'],
+    standalone: false
 })
 export class MultipleInputWidgetComponent extends PageComponent implements OnInit, OnDestroy {
 
@@ -190,7 +179,9 @@ export class MultipleInputWidgetComponent extends PageComponent implements OnIni
     this.buildForm();
     this.ctx.updateWidgetParams();
     this.formResize$ = new ResizeObserver(() => {
-      this.resize();
+      this.ngZone.run(() => {
+        this.resize();
+      });
     });
     this.formResize$.observe(this.formContainerRef.nativeElement);
   }
@@ -299,7 +290,7 @@ export class MultipleInputWidgetComponent extends PageComponent implements OnIni
 
             // For backward compatibility
 
-            if (dataKey.settings.dataKeyValueType === 'select') {
+            if (dataKey.settings.dataKeyValueType === 'select' || dataKey.settings.dataKeyValueType === 'radio') {
               dataKey.settings.selectOptions.forEach((option) => {
                 if (option.value.toLowerCase() === 'null') {
                   option.value = null;
@@ -312,7 +303,7 @@ export class MultipleInputWidgetComponent extends PageComponent implements OnIni
             }
 
             if (dataKey.settings.useCustomIcon && isDefinedAndNotNull(dataKey.settings.customIcon)) {
-              dataKey.settings.safeCustomIcon = this.sanitizer.bypassSecurityTrustUrl(dataKey.settings.customIcon);
+              dataKey.settings.customIconUrl = dataKey.settings.customIcon;
             }
 
             if (dataKey.settings.useGetValueFunction && dataKey.settings.getValueFunctionBody.length) {
@@ -443,6 +434,7 @@ export class MultipleInputWidgetComponent extends PageComponent implements OnIni
               }
               break;
             case 'select':
+            case 'radio':
               value = keyValue !== null ? keyValue.toString() : null;
               break;
             case 'JSON':
@@ -563,6 +555,12 @@ export class MultipleInputWidgetComponent extends PageComponent implements OnIni
         return '';
     }
     return this.getTranslatedErrorText(errorMessage, defaultMessage, messageValues);
+  }
+
+  public radioButtonSelectedColor(radioColor: string) {
+    if (isDefinedAndNotNull(radioColor)) {
+      return `--mat-radio-selected-icon-color: ${radioColor}; --mat-radio-selected-focus-icon-color: ${radioColor}; --mat-radio-selected-hover-icon-color: ${radioColor}; --mat-radio-selected-pressed-icon-color: ${radioColor}; --mat-radio-checked-ripple-color: ${radioColor};`
+    }
   }
 
   public getTranslatedErrorText(errorMessage: string, defaultMessage: string, messageValues?: object): string {
@@ -783,10 +781,10 @@ export class MultipleInputWidgetComponent extends PageComponent implements OnIni
       }
     }).afterClosed().subscribe(
       (res) => {
-        if (!isEqual(res, formControl.value)) {
+        if (isDefined(res) && !isEqual(res, formControl.value)) {
           formControl.patchValue(res);
           formControl.markAsDirty();
-          if(!this.settings.showActionButtons) {
+          if (!this.settings.showActionButtons) {
             this.inputChanged(source, key);
           }
         }

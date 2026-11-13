@@ -1,18 +1,6 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
+// SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
 package org.thingsboard.server.service.subscription;
 
 import lombok.Getter;
@@ -44,7 +32,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Slf4j
-public abstract class TbAbstractDataSubCtx<T extends AbstractDataQuery<? extends EntityDataPageLink>> extends TbAbstractSubCtx<T> {
+public abstract class TbAbstractDataSubCtx<T extends AbstractDataQuery<? extends EntityDataPageLink>> extends TbAbstractEntityQuerySubCtx<T> {
 
     protected final Map<Integer, EntityId> subToEntityIdMap;
     @Getter
@@ -64,7 +52,7 @@ public abstract class TbAbstractDataSubCtx<T extends AbstractDataQuery<? extends
     }
 
     protected PageData<EntityData> findEntityData() {
-        PageData<EntityData> result = entityService.findEntityDataByQuery(getTenantId(), getCustomerId(), buildEntityDataQuery());
+        PageData<EntityData> result = entityService.findEntityDataByQuery(getTenantId(), getCustomerId(), getMergedUserPermissions(), buildEntityDataQuery());
         if (log.isTraceEnabled()) {
             result.getData().forEach(ed -> {
                 log.trace("[{}][{}] EntityData: {}", getSessionId(), getCmdId(), ed);
@@ -113,7 +101,7 @@ public abstract class TbAbstractDataSubCtx<T extends AbstractDataQuery<? extends
     public void clearEntitySubscriptions() {
         if (subToEntityIdMap != null) {
             for (Integer subId : subToEntityIdMap.keySet()) {
-                localSubscriptionService.cancelSubscription(sessionRef.getSessionId(), subId);
+                localSubscriptionService.cancelSubscription(getTenantId(), getSessionId(), subId);
             }
             subToEntityIdMap.clear();
         }
@@ -132,7 +120,7 @@ public abstract class TbAbstractDataSubCtx<T extends AbstractDataQuery<? extends
             int subIdx = sessionRef.getSessionSubIdSeq().incrementAndGet();
             subToEntityIdMap.put(subIdx, entityData.getEntityId());
             localSubscriptionService.addSubscription(
-                    createTsSub(entityData, subIdx, false, startTs, endTs, keyStates, resultToLatestValues));
+                    createTsSub(entityData, subIdx, false, startTs, endTs, keyStates, resultToLatestValues), sessionRef);
         });
     }
 
@@ -140,7 +128,7 @@ public abstract class TbAbstractDataSubCtx<T extends AbstractDataQuery<? extends
         Map<EntityKeyType, List<EntityKey>> keysByType = getEntityKeyByTypeMap(keys);
         for (EntityData entityData : data.getData()) {
             List<TbSubscription> entitySubscriptions = addSubscriptions(entityData, keysByType, latestValues, startTs, endTs);
-            entitySubscriptions.forEach(localSubscriptionService::addSubscription);
+            entitySubscriptions.forEach(subscription -> localSubscriptionService.addSubscription(subscription, sessionRef));
         }
     }
 
@@ -157,19 +145,29 @@ public abstract class TbAbstractDataSubCtx<T extends AbstractDataQuery<? extends
             subToEntityIdMap.put(subIdx, entityData.getEntityId());
             switch (keysType) {
                 case TIME_SERIES:
-                    subscriptionList.add(createTsSub(entityData, subIdx, keysList, latestValues, startTs, endTs));
+                    if (entityData.isReadTs()) {
+                        subscriptionList.add(createTsSub(entityData, subIdx, keysList, latestValues, startTs, endTs));
+                    }
                     break;
                 case CLIENT_ATTRIBUTE:
-                    subscriptionList.add(createAttrSub(entityData, subIdx, keysType, TbAttributeSubscriptionScope.CLIENT_SCOPE, keysList));
+                    if (entityData.isReadAttrs()) {
+                        subscriptionList.add(createAttrSub(entityData, subIdx, keysType, TbAttributeSubscriptionScope.CLIENT_SCOPE, keysList));
+                    }
                     break;
                 case SHARED_ATTRIBUTE:
-                    subscriptionList.add(createAttrSub(entityData, subIdx, keysType, TbAttributeSubscriptionScope.SHARED_SCOPE, keysList));
+                    if (entityData.isReadAttrs()) {
+                        subscriptionList.add(createAttrSub(entityData, subIdx, keysType, TbAttributeSubscriptionScope.SHARED_SCOPE, keysList));
+                    }
                     break;
                 case SERVER_ATTRIBUTE:
-                    subscriptionList.add(createAttrSub(entityData, subIdx, keysType, TbAttributeSubscriptionScope.SERVER_SCOPE, keysList));
+                    if (entityData.isReadAttrs()) {
+                        subscriptionList.add(createAttrSub(entityData, subIdx, keysType, TbAttributeSubscriptionScope.SERVER_SCOPE, keysList));
+                    }
                     break;
                 case ATTRIBUTE:
-                    subscriptionList.add(createAttrSub(entityData, subIdx, keysType, TbAttributeSubscriptionScope.ANY_SCOPE, keysList));
+                    if (entityData.isReadAttrs()) {
+                        subscriptionList.add(createAttrSub(entityData, subIdx, keysType, TbAttributeSubscriptionScope.ANY_SCOPE, keysList));
+                    }
                     break;
             }
         });
@@ -186,6 +184,7 @@ public abstract class TbAbstractDataSubCtx<T extends AbstractDataQuery<? extends
                 .tenantId(sessionRef.getSecurityCtx().getTenantId())
                 .entityId(entityData.getEntityId())
                 .updateProcessor((sub, subscriptionUpdate) -> sendWsMsg(sub.getSessionId(), subscriptionUpdate, keysType))
+                .queryTs(createdTime)
                 .allKeys(false)
                 .keyStates(keyStates)
                 .scope(scope)
@@ -207,19 +206,20 @@ public abstract class TbAbstractDataSubCtx<T extends AbstractDataQuery<? extends
         return createTsSub(entityData, subIdx, latestValues, startTs, endTs, keyStates);
     }
 
-    private TbTimeseriesSubscription createTsSub(EntityData entityData, int subIdx, boolean latestValues, long startTs, long endTs, Map<String, Long> keyStates) {
+    private TbTimeSeriesSubscription createTsSub(EntityData entityData, int subIdx, boolean latestValues, long startTs, long endTs, Map<String, Long> keyStates) {
         return createTsSub(entityData, subIdx, latestValues, startTs, endTs, keyStates, latestValues);
     }
 
-    private TbTimeseriesSubscription createTsSub(EntityData entityData, int subIdx, boolean latestValues, long startTs, long endTs, Map<String, Long> keyStates, boolean resultToLatestValues) {
+    private TbTimeSeriesSubscription createTsSub(EntityData entityData, int subIdx, boolean latestValues, long startTs, long endTs, Map<String, Long> keyStates, boolean resultToLatestValues) {
         log.trace("[{}][{}][{}] Creating time-series subscription for [{}] with keys: {}", serviceId, cmdId, subIdx, entityData.getEntityId(), keyStates);
-        return TbTimeseriesSubscription.builder()
+        return TbTimeSeriesSubscription.builder()
                 .serviceId(serviceId)
                 .sessionId(sessionRef.getSessionId())
                 .subscriptionId(subIdx)
                 .tenantId(sessionRef.getSecurityCtx().getTenantId())
                 .entityId(entityData.getEntityId())
                 .updateProcessor((sub, subscriptionUpdate) -> sendWsMsg(sub.getSessionId(), subscriptionUpdate, EntityKeyType.TIME_SERIES, resultToLatestValues))
+                .queryTs(createdTime)
                 .allKeys(false)
                 .keyStates(keyStates)
                 .latestValues(latestValues)
@@ -252,4 +252,5 @@ public abstract class TbAbstractDataSubCtx<T extends AbstractDataQuery<? extends
     abstract void sendWsMsg(String sessionId, TelemetrySubscriptionUpdate subscriptionUpdate, EntityKeyType keyType, boolean resultToLatestValues);
 
     protected abstract Aggregation getCurrentAggregation();
+
 }

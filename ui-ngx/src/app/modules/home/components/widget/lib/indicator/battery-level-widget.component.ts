@@ -1,19 +1,5 @@
-///
-/// Copyright © 2016-2023 The Thingsboard Authors
-///
-/// Licensed under the Apache License, Version 2.0 (the "License");
-/// you may not use this file except in compliance with the License.
-/// You may obtain a copy of the License at
-///
-///     http://www.apache.org/licenses/LICENSE-2.0
-///
-/// Unless required by applicable law or agreed to in writing, software
-/// distributed under the License is distributed on an "AS IS" BASIS,
-/// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-/// See the License for the specific language governing permissions and
-/// limitations under the License.
-///
-
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-License-Identifier: Apache-2.0
 import {
   AfterViewInit,
   ChangeDetectorRef,
@@ -24,27 +10,29 @@ import {
   OnInit,
   Renderer2,
   TemplateRef,
-  ViewChild
+  ViewChild,
+  ViewEncapsulation
 } from '@angular/core';
 import { WidgetContext } from '@home/models/widget-component.models';
-import { formatValue, isDefinedAndNotNull, isNumeric } from '@core/utils';
-import { DatePipe } from '@angular/common';
+import { isDefinedAndNotNull, isNumeric } from '@core/utils';
 import {
   backgroundStyle,
   ColorProcessor,
   ComponentStyle,
-  getDataKey,
+  createValueFormatterFromSettings,
   getSingleTsValue,
   overlayStyle,
-  textStyle
+  textStyle,
+  ValueFormatProcessor
 } from '@shared/models/widget-settings.models';
-import { WidgetComponent } from '@home/components/widget/widget.component';
 import {
   batteryLevelDefaultSettings,
   BatteryLevelLayout,
   BatteryLevelWidgetSettings
 } from '@home/components/widget/lib/indicator/battery-level-widget.models';
-import { ResizeObserver } from '@juggle/resize-observer';
+import { Observable } from 'rxjs';
+import { ImagePipe } from '@shared/pipe/image.pipe';
+import { DomSanitizer } from '@angular/platform-browser';
 
 const verticalBatteryDimensions = {
   shapeAspectRatio: 64 / 113,
@@ -72,9 +60,11 @@ const horizontalBatteryDimensions = {
 };
 
 @Component({
-  selector: 'tb-battery-level-widget',
-  templateUrl: './battery-level-widget.component.html',
-  styleUrls: ['./battery-level-widget.component.scss']
+    selector: 'tb-battery-level-widget',
+    templateUrl: './battery-level-widget.component.html',
+    styleUrls: ['./battery-level-widget.component.scss'],
+    encapsulation: ViewEncapsulation.None,
+    standalone: false
 })
 export class BatteryLevelWidgetComponent implements OnInit, OnDestroy, AfterViewInit {
 
@@ -115,24 +105,28 @@ export class BatteryLevelWidgetComponent implements OnInit, OnDestroy, AfterView
 
   value: number;
 
-  batterySections: boolean[] = [false, false, false, false];
+  batteryFillValue: number;
+
+  batterySections: boolean[];
+  dividedBorderRadius: string;
+  dividedGap: string;
 
   batteryLevelColor: ColorProcessor;
 
   batteryShapeColor: ColorProcessor;
 
-  backgroundStyle: ComponentStyle = {};
+  backgroundStyle$: Observable<ComponentStyle>;
   overlayStyle: ComponentStyle = {};
+  padding: string;
 
   batteryBoxResize$: ResizeObserver;
 
   hasCardClickAction = false;
 
-  private decimals = 0;
-  private units = '';
+  private valueFormat: ValueFormatProcessor;
 
-  constructor(private date: DatePipe,
-              private widgetComponent: WidgetComponent,
+  constructor(private imagePipe: ImagePipe,
+              private sanitizer: DomSanitizer,
               private renderer: Renderer2,
               private cd: ChangeDetectorRef) {
   }
@@ -141,35 +135,67 @@ export class BatteryLevelWidgetComponent implements OnInit, OnDestroy, AfterView
     this.ctx.$scope.batteryLevelWidget = this;
     this.settings = {...batteryLevelDefaultSettings, ...this.ctx.settings};
 
-    this.decimals = this.ctx.decimals;
-    this.units = this.ctx.units;
-    const dataKey = getDataKey(this.ctx.datasources);
-    if (isDefinedAndNotNull(dataKey?.decimals)) {
-      this.decimals = dataKey.decimals;
-    }
-    if (dataKey?.units) {
-      this.units = dataKey.units;
-    }
+    this.valueFormat = createValueFormatterFromSettings(this.ctx);
 
     this.layout = this.settings.layout;
 
     this.vertical = [BatteryLevelLayout.vertical_solid, BatteryLevelLayout.vertical_divided].includes(this.layout);
     this.layoutClass = this.vertical ? 'vertical' : 'horizontal';
     this.solid = [BatteryLevelLayout.vertical_solid, BatteryLevelLayout.horizontal_solid].includes(this.layout);
+    if (!this.solid) {
+      let sectionsCount = this.settings.sectionsCount;
+      if (!sectionsCount) {
+        sectionsCount = 4;
+      }
+      sectionsCount = Math.min(Math.max(sectionsCount, 2), 20);
+      this.batterySections = Array.from(Array(sectionsCount), () => false);
+      const gap = 1 + (24 - sectionsCount) / 10;
+      this.dividedGap = `${gap}%`;
+      const containerAspect = 0.5567;
+      const sectionHeight = (100 - (gap * (sectionsCount - 1))) / sectionsCount;
+      const sectionAspect = 100 * containerAspect / sectionHeight;
+      const rad1 = 8.425 - sectionsCount * 0.32125;
+      const rad2 = rad1 * sectionAspect;
+      if (this.vertical) {
+        this.dividedBorderRadius = `${rad1}% / ${rad2}%`;
+      } else {
+        this.dividedBorderRadius = `${rad2}% / ${rad1}%`;
+      }
+    }
 
     this.showValue = this.settings.showValue;
     this.autoScaleValueSize = this.showValue && this.settings.autoScaleValueSize;
-    this.valueStyle = textStyle(this.settings.valueFont,  '0.1px');
-    this.valueColor = ColorProcessor.fromSettings(this.settings.valueColor);
+    this.valueStyle = textStyle(this.settings.valueFont);
+    this.valueColor = ColorProcessor.fromColorProcessorSettings({
+      settings: this.settings.valueColor,
+      ctx: this.ctx,
+      minGradientValue: 0,
+      maxGradientValue: 100
+    });
 
-    this.batteryLevelColor = ColorProcessor.fromSettings(this.settings.batteryLevelColor);
+    this.batteryLevelColor = ColorProcessor.fromColorProcessorSettings({
+      settings: this.settings.batteryLevelColor,
+      ctx: this.ctx,
+      minGradientValue: 0,
+      maxGradientValue: 100
+    });
 
-    this.batteryShapeColor = ColorProcessor.fromSettings(this.settings.batteryShapeColor);
+    this.batteryShapeColor = ColorProcessor.fromColorProcessorSettings({
+      settings: this.settings.batteryShapeColor,
+      ctx: this.ctx,
+      minGradientValue: 0,
+      maxGradientValue: 100
+    });
 
-    this.backgroundStyle = backgroundStyle(this.settings.background);
+    this.backgroundStyle$ = backgroundStyle(this.settings.background, this.imagePipe, this.sanitizer);
     this.overlayStyle = overlayStyle(this.settings.background.overlay);
+    this.padding = this.settings.background.overlay.enabled ? undefined : this.settings.padding;
 
     this.hasCardClickAction = this.ctx.actionsApi.getActionDescriptors('cardClick').length > 0;
+
+    this.valueColor.colorUpdated?.subscribe(() => this.cd.markForCheck());
+    this.batteryLevelColor.colorUpdated?.subscribe(() => this.cd.markForCheck());
+    this.batteryShapeColor.colorUpdated?.subscribe(() => this.cd.markForCheck());
   }
 
   ngAfterViewInit() {
@@ -187,6 +213,10 @@ export class BatteryLevelWidgetComponent implements OnInit, OnDestroy, AfterView
     if (this.batteryBoxResize$) {
       this.batteryBoxResize$.disconnect();
     }
+
+    this.batteryLevelColor.destroy();
+    this.valueColor.destroy();
+    this.batteryShapeColor.destroy();
   }
 
   public onInit() {
@@ -197,10 +227,11 @@ export class BatteryLevelWidgetComponent implements OnInit, OnDestroy, AfterView
 
   public onDataUpdated() {
     const tsValue = getSingleTsValue(this.ctx.data);
-    this.value = 0;
+    this.batteryFillValue = 0;
     if (tsValue && isDefinedAndNotNull(tsValue[1]) && isNumeric(tsValue[1])) {
       this.value = tsValue[1];
-      this.valueText = formatValue(this.value, this.decimals, this.units, true);
+      this.batteryFillValue = this.parseBatteryFillValue(this.value);
+      this.valueText = this.valueFormat.format(this.value);
     } else {
       this.valueText = 'N/A';
     }
@@ -216,8 +247,14 @@ export class BatteryLevelWidgetComponent implements OnInit, OnDestroy, AfterView
     this.cd.detectChanges();
   }
 
-  public trackBySection(index: number): number {
-    return index;
+  parseBatteryFillValue(value: number) {
+    if (value < 0) {
+      return 0;
+    } else if (value > 100) {
+      return 100;
+    } else {
+      return value;
+    }
   }
 
   public cardClick($event: Event) {
@@ -239,8 +276,11 @@ export class BatteryLevelWidgetComponent implements OnInit, OnDestroy, AfterView
         if (this.autoScaleValueSize) {
           const valueFontSize = ratios.valueFontSizeRatio * boxSize;
           const valueLineHeight = ratios.valueLineHeightRaio * boxSize;
+          this.renderer.setStyle(this.batteryLevelValue.nativeElement, 'minWidth', '0');
           this.setValueFontSize(valueFontSize, valueLineHeight, boxWidth);
         }
+        const fontSize = parseInt(window.getComputedStyle(this.batteryLevelValue.nativeElement).fontSize, 10) || 10;
+        this.renderer.setStyle(this.batteryLevelValue.nativeElement, 'minWidth', `${Math.min(fontSize*4, boxWidth)}px`);
       }
       let height = this.batteryLevelContent.nativeElement.getBoundingClientRect().height;
       const width = height * verticalBatteryDimensions.shapeAspectRatio;
@@ -262,7 +302,7 @@ export class BatteryLevelWidgetComponent implements OnInit, OnDestroy, AfterView
         const newWidth = height * horizontalBatteryDimensions.shapeAspectRatio;
         this.renderer.setStyle(this.batteryLevelRectangle.nativeElement, 'width', newWidth + 'px');
       } else {
-        this.renderer.setStyle(this.batteryLevelRectangle.nativeElement, 'width', null);
+        this.renderer.setStyle(this.batteryLevelRectangle.nativeElement, 'width', width + 'px');
       }
       if (this.batteryLevelValue) {
         const ratios = horizontalBatteryDimensions.heightRatio;

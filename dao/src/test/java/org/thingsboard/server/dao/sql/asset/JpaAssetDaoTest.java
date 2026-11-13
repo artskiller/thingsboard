@@ -1,18 +1,5 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-License-Identifier: Apache-2.0
 package org.thingsboard.server.dao.sql.asset;
 
 import com.datastax.oss.driver.api.core.uuid.Uuids;
@@ -78,7 +65,7 @@ public class JpaAssetDaoTest extends AbstractJpaDaoTest {
             UUID assetId = Uuids.timeBased();
             UUID tenantId = i % 2 == 0 ? tenantId1 : tenantId2;
             UUID customerId = i % 2 == 0 ? customerId1 : customerId2;
-            assets.add(saveAsset(assetId, tenantId, customerId, "ASSET_" + i));
+            assets.add(saveAsset(assetId, tenantId, customerId, "ASSET_" + i, "label_" + i));
         }
         assertEquals(assets.size(), assetDao.find(TenantId.fromUUID(tenantId1)).size());
     }
@@ -119,6 +106,21 @@ public class JpaAssetDaoTest extends AbstractJpaDaoTest {
     @Test
     public void testFindAssetsByTenantIdAndCustomerId() {
         PageLink pageLink = new PageLink(20, 0, "ASSET_");
+        PageData<Asset> assets1 = assetDao.findAssetsByTenantIdAndCustomerId(tenantId1, customerId1, pageLink);
+        assertEquals(20, assets1.getData().size());
+
+        pageLink = pageLink.nextPageLink();
+        PageData<Asset> assets2 = assetDao.findAssetsByTenantIdAndCustomerId(tenantId1, customerId1, pageLink);
+        assertEquals(10, assets2.getData().size());
+
+        pageLink = pageLink.nextPageLink();
+        PageData<Asset> assets3 = assetDao.findAssetsByTenantIdAndCustomerId(tenantId1, customerId1, pageLink);
+        assertEquals(0, assets3.getData().size());
+    }
+
+    @Test
+    public void testFindAssetsByTenantIdAndCustomerIdByLabel() {
+        PageLink pageLink = new PageLink(20, 0, "label_");
         PageData<Asset> assets1 = assetDao.findAssetsByTenantIdAndCustomerId(tenantId1, customerId1, pageLink);
         assertEquals(20, assets1.getData().size());
 
@@ -180,21 +182,31 @@ public class JpaAssetDaoTest extends AbstractJpaDaoTest {
     @Test
     public void testFindAssetsByTenantIdAndType() {
         String type = "TYPE_2";
-        assets.add(saveAsset(Uuids.timeBased(), tenantId2, customerId2, "TEST_ASSET", type));
+        String testLabel = "test_label";
+        assets.add(saveAsset(Uuids.timeBased(), tenantId2, customerId2, "TEST_ASSET", type, testLabel));
 
         List<Asset> foundedAssetsByType = assetDao
                 .findAssetsByTenantIdAndType(tenantId2, type, new PageLink(3)).getData();
         compareFoundedAssetByType(foundedAssetsByType, type);
+
+        List<Asset> foundedAssetsByTypeAndLabel = assetDao
+                .findAssetsByTenantIdAndType(tenantId2, type, new PageLink(3, 0, testLabel)).getData();
+        assertEquals(1, foundedAssetsByTypeAndLabel.size());
     }
 
     @Test
     public void testFindAssetsByTenantIdAndCustomerIdAndType() {
         String type = "TYPE_2";
-        assets.add(saveAsset(Uuids.timeBased(), tenantId2, customerId2, "TEST_ASSET", type));
+        String testLabel = "test_label";
+        assets.add(saveAsset(Uuids.timeBased(), tenantId2, customerId2, "TEST_ASSET", type, testLabel));
 
         List<Asset> foundedAssetsByType = assetDao
                 .findAssetsByTenantIdAndCustomerIdAndType(tenantId2, customerId2, type, new PageLink(3)).getData();
         compareFoundedAssetByType(foundedAssetsByType, type);
+
+        List<Asset> foundedAssetsByTypeAndLabel = assetDao
+                .findAssetsByTenantIdAndCustomerIdAndType(tenantId2, customerId2, type, new PageLink(3, 0, testLabel)).getData();
+        assertEquals(1, foundedAssetsByTypeAndLabel.size());
     }
 
     private void compareFoundedAssetByType(List<Asset> foundedAssetsByType, String type) {
@@ -228,10 +240,14 @@ public class JpaAssetDaoTest extends AbstractJpaDaoTest {
     }
 
     private Asset saveAsset(UUID id, UUID tenantId, UUID customerId, String name) {
-        return saveAsset(id, tenantId, customerId, name, null);
+        return saveAsset(id, tenantId, customerId, name, null, null);
     }
 
-    private Asset saveAsset(UUID id, UUID tenantId, UUID customerId, String name, String type) {
+    private Asset saveAsset(UUID id, UUID tenantId, UUID customerId, String name, String label) {
+        return saveAsset(id, tenantId, customerId, name, null, label);
+    }
+
+    private Asset saveAsset(UUID id, UUID tenantId, UUID customerId, String name, String type, String label) {
         if (type == null) {
             type = "default";
         }
@@ -241,6 +257,7 @@ public class JpaAssetDaoTest extends AbstractJpaDaoTest {
         asset.setCustomerId(new CustomerId(customerId));
         asset.setName(name);
         asset.setType(type);
+        asset.setLabel(label);
         asset.setAssetProfileId(assetProfileId(type));
         return assetDao.save(TenantId.fromUUID(tenantId), asset);
     }

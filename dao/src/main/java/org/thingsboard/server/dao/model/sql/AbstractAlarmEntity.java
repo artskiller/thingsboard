@@ -1,25 +1,16 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
+// SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
 package org.thingsboard.server.dao.model.sql;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.MappedSuperclass;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
-import org.hibernate.annotations.Type;
-import org.hibernate.annotations.TypeDef;
 import org.springframework.util.CollectionUtils;
 import org.thingsboard.server.common.data.EntityType;
 import org.thingsboard.server.common.data.StringUtils;
@@ -33,12 +24,8 @@ import org.thingsboard.server.common.data.id.UserId;
 import org.thingsboard.server.dao.model.BaseEntity;
 import org.thingsboard.server.dao.model.BaseSqlEntity;
 import org.thingsboard.server.dao.model.ModelConstants;
-import org.thingsboard.server.dao.util.mapping.JsonStringType;
+import org.thingsboard.server.dao.util.mapping.JsonConverter;
 
-import javax.persistence.Column;
-import javax.persistence.EnumType;
-import javax.persistence.Enumerated;
-import javax.persistence.MappedSuperclass;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.UUID;
@@ -55,6 +42,7 @@ import static org.thingsboard.server.dao.model.ModelConstants.ALARM_ORIGINATOR_I
 import static org.thingsboard.server.dao.model.ModelConstants.ALARM_ORIGINATOR_TYPE_PROPERTY;
 import static org.thingsboard.server.dao.model.ModelConstants.ALARM_PROPAGATE_PROPERTY;
 import static org.thingsboard.server.dao.model.ModelConstants.ALARM_PROPAGATE_RELATION_TYPES;
+import static org.thingsboard.server.dao.model.ModelConstants.ALARM_PROPAGATE_TO_OWNER_HIERARCHY_PROPERTY;
 import static org.thingsboard.server.dao.model.ModelConstants.ALARM_PROPAGATE_TO_OWNER_PROPERTY;
 import static org.thingsboard.server.dao.model.ModelConstants.ALARM_PROPAGATE_TO_TENANT_PROPERTY;
 import static org.thingsboard.server.dao.model.ModelConstants.ALARM_SEVERITY_PROPERTY;
@@ -64,17 +52,19 @@ import static org.thingsboard.server.dao.model.ModelConstants.ALARM_TYPE_PROPERT
 
 @Data
 @EqualsAndHashCode(callSuper = true)
-@TypeDef(name = "json", typeClass = JsonStringType.class)
 @MappedSuperclass
 public abstract class AbstractAlarmEntity<T extends Alarm> extends BaseSqlEntity<T> implements BaseEntity<T> {
 
-    @Column(name = ALARM_TENANT_ID_PROPERTY)
+    @Column(name = ALARM_TENANT_ID_PROPERTY, columnDefinition = "uuid")
     private UUID tenantId;
 
     @Column(name = ALARM_CUSTOMER_ID_PROPERTY)
     private UUID customerId;
 
-    @Column(name = ALARM_ORIGINATOR_ID_PROPERTY)
+    // originator_id is the alarm's Citus distribution (shard) column and is immutable for an alarm's lifetime.
+    // Marking it non-updatable keeps it out of Hibernate's UPDATE SET clause: Citus rejects any UPDATE that
+    // modifies the distribution column, and the native alarm procedures never update it either.
+    @Column(name = ALARM_ORIGINATOR_ID_PROPERTY, columnDefinition = "uuid", updatable = false)
     private UUID originatorId;
 
     @Column(name = ALARM_ORIGINATOR_TYPE_PROPERTY)
@@ -87,7 +77,6 @@ public abstract class AbstractAlarmEntity<T extends Alarm> extends BaseSqlEntity
     @Column(name = ALARM_SEVERITY_PROPERTY)
     private AlarmSeverity severity;
 
-    @Type(type="pg-uuid")
     @Column(name = ALARM_ASSIGNEE_ID_PROPERTY)
     private UUID assigneeId;
 
@@ -112,7 +101,7 @@ public abstract class AbstractAlarmEntity<T extends Alarm> extends BaseSqlEntity
     @Column(name = ALARM_ASSIGN_TS_PROPERTY)
     private Long assignTs;
 
-    @Type(type = "json")
+    @Convert(converter = JsonConverter.class)
     @Column(name = ModelConstants.ALARM_DETAILS_PROPERTY)
     private JsonNode details;
 
@@ -121,6 +110,9 @@ public abstract class AbstractAlarmEntity<T extends Alarm> extends BaseSqlEntity
 
     @Column(name = ALARM_PROPAGATE_TO_OWNER_PROPERTY)
     private Boolean propagateToOwner;
+
+    @Column(name = ALARM_PROPAGATE_TO_OWNER_HIERARCHY_PROPERTY)
+    private Boolean propagateToOwnerHierarchy;
 
     @Column(name = ALARM_PROPAGATE_TO_TENANT_PROPERTY)
     private Boolean propagateToTenant;
@@ -155,6 +147,7 @@ public abstract class AbstractAlarmEntity<T extends Alarm> extends BaseSqlEntity
         }
         this.propagate = alarm.isPropagate();
         this.propagateToOwner = alarm.isPropagateToOwner();
+        this.propagateToOwnerHierarchy = alarm.isPropagateToOwnerHierarchy();
         this.propagateToTenant = alarm.isPropagateToTenant();
         this.startTs = alarm.getStartTs();
         this.endTs = alarm.getEndTs();
@@ -184,6 +177,7 @@ public abstract class AbstractAlarmEntity<T extends Alarm> extends BaseSqlEntity
         this.assigneeId = alarmEntity.getAssigneeId();
         this.propagate = alarmEntity.getPropagate();
         this.propagateToOwner = alarmEntity.getPropagateToOwner();
+        this.propagateToOwnerHierarchy = alarmEntity.getPropagateToOwnerHierarchy();
         this.propagateToTenant = alarmEntity.getPropagateToTenant();
         this.startTs = alarmEntity.getStartTs();
         this.endTs = alarmEntity.getEndTs();
@@ -213,6 +207,7 @@ public abstract class AbstractAlarmEntity<T extends Alarm> extends BaseSqlEntity
         }
         alarm.setPropagate(propagate);
         alarm.setPropagateToOwner(propagateToOwner);
+        alarm.setPropagateToOwnerHierarchy(propagateToOwnerHierarchy);
         alarm.setPropagateToTenant(propagateToTenant);
         alarm.setStartTs(startTs);
         alarm.setEndTs(endTs);

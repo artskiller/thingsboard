@@ -1,18 +1,6 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
+// SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
 package org.thingsboard.server.dao.event;
 
 import com.google.common.util.concurrent.ListenableFuture;
@@ -23,11 +11,15 @@ import org.springframework.stereotype.Service;
 import org.thingsboard.server.common.data.EntityType;
 import org.thingsboard.server.common.data.EventInfo;
 import org.thingsboard.server.common.data.StringUtils;
+import org.thingsboard.server.common.data.event.ConverterDebugEvent;
+import org.thingsboard.server.common.data.event.CalculatedFieldDebugEvent;
 import org.thingsboard.server.common.data.event.ErrorEvent;
 import org.thingsboard.server.common.data.event.Event;
 import org.thingsboard.server.common.data.event.EventFilter;
 import org.thingsboard.server.common.data.event.EventType;
+import org.thingsboard.server.common.data.event.IntegrationDebugEvent;
 import org.thingsboard.server.common.data.event.LifecycleEvent;
+import org.thingsboard.server.common.data.event.RawDataEvent;
 import org.thingsboard.server.common.data.event.RuleChainDebugEvent;
 import org.thingsboard.server.common.data.event.RuleNodeDebugEvent;
 import org.thingsboard.server.common.data.id.EntityId;
@@ -37,6 +29,7 @@ import org.thingsboard.server.common.data.page.TimePageLink;
 import org.thingsboard.server.dao.service.DataValidator;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -44,11 +37,6 @@ import java.util.stream.Collectors;
 @Service
 @Slf4j
 public class BaseEventService implements EventService {
-
-    @Value("${sql.ttl.events.events_ttl:0}")
-    private long ttlInSec;
-    @Value("${sql.ttl.events.debug_events_ttl:604800}")
-    private long debugTtlInSec;
 
     @Value("${event.debug.max-symbols:4096}")
     private int maxDebugEventSymbols;
@@ -87,17 +75,37 @@ public class BaseEventService implements EventService {
                 ErrorEvent eEvent = (ErrorEvent) event;
                 truncateField(eEvent, ErrorEvent::getError, ErrorEvent::setError);
                 break;
+            case RAW_DATA:
+                RawDataEvent rawDataEvent = (RawDataEvent) event;
+                truncateField(rawDataEvent, RawDataEvent::getUuid, RawDataEvent::setUuid);
+                truncateField(rawDataEvent, RawDataEvent::getMessage, RawDataEvent::setMessage);
+                truncateField(rawDataEvent, RawDataEvent::getMessageType, RawDataEvent::setMessageType);
+                break;
+            case DEBUG_CONVERTER:
+                ConverterDebugEvent cEvent = (ConverterDebugEvent) event;
+                truncateField(cEvent, ConverterDebugEvent::getInMsg, ConverterDebugEvent::setInMsg);
+                truncateField(cEvent, ConverterDebugEvent::getOutMsg, ConverterDebugEvent::setOutMsg);
+                truncateField(cEvent, ConverterDebugEvent::getMetadata, ConverterDebugEvent::setMetadata);
+                truncateField(cEvent, ConverterDebugEvent::getError, ConverterDebugEvent::setError);
+                break;
+            case DEBUG_INTEGRATION:
+                IntegrationDebugEvent iEvent = (IntegrationDebugEvent) event;
+                truncateField(iEvent, IntegrationDebugEvent::getMessage, IntegrationDebugEvent::setMessage);
+                truncateField(iEvent, IntegrationDebugEvent::getStatus, IntegrationDebugEvent::setStatus);
+                truncateField(iEvent, IntegrationDebugEvent::getError, IntegrationDebugEvent::setError);
+                break;
+            case DEBUG_CALCULATED_FIELD:
+                CalculatedFieldDebugEvent cfEvent = (CalculatedFieldDebugEvent) event;
+                truncateField(cfEvent, CalculatedFieldDebugEvent::getArguments, CalculatedFieldDebugEvent::setArguments);
+                truncateField(cfEvent, CalculatedFieldDebugEvent::getResult, CalculatedFieldDebugEvent::setResult);
+                truncateField(cfEvent, CalculatedFieldDebugEvent::getError, CalculatedFieldDebugEvent::setError);
         }
     }
 
     private <T extends Event> void truncateField(T event, Function<T, String> getter, BiConsumer<T, String> setter) {
         var str = getter.apply(event);
-        if (StringUtils.isNotEmpty(str)) {
-            var length = str.length();
-            if (length > maxDebugEventSymbols) {
-                setter.accept(event, str.substring(0, maxDebugEventSymbols) + "...[truncated " + (length - maxDebugEventSymbols) + " symbols]");
-            }
-        }
+        str = StringUtils.truncate(str, maxDebugEventSymbols);
+        setter.accept(event, str);
     }
 
     @Override
@@ -111,13 +119,23 @@ public class BaseEventService implements EventService {
     }
 
     @Override
+    public EventInfo findLatestDebugRuleNodeInEvent(TenantId tenantId, EntityId entityId) {
+        return convert(entityId.getEntityType(), eventDao.findLatestDebugRuleNodeInEvent(tenantId.getId(), entityId.getId()));
+    }
+
+    @Override
     public PageData<EventInfo> findEventsByFilter(TenantId tenantId, EntityId entityId, EventFilter eventFilter, TimePageLink pageLink) {
         return convert(entityId.getEntityType(), eventDao.findEventByFilter(tenantId.getId(), entityId.getId(), eventFilter, pageLink));
     }
 
     @Override
     public void removeEvents(TenantId tenantId, EntityId entityId) {
-        removeEvents(tenantId, entityId, null, null, null);
+        removeEvents(tenantId, entityId, null, null);
+    }
+
+    @Override
+    public void removeEvents(TenantId tenantId, EntityId entityId, Long startTime, Long endTime, EventType... types) {
+        eventDao.removeEvents(tenantId.getId(), entityId.getId(), startTime, endTime, types);
     }
 
     @Override
@@ -134,11 +152,6 @@ public class BaseEventService implements EventService {
         eventDao.cleanupEvents(regularEventExpTs, debugEventExpTs, cleanupDb);
     }
 
-    @Override
-    public void migrateEvents() {
-        eventDao.migrateEvents(ttlInSec > 0 ? (System.currentTimeMillis() - ttlInSec * 1000) : 0, debugTtlInSec > 0 ? (System.currentTimeMillis() - debugTtlInSec * 1000) : 0);
-    }
-
     private PageData<EventInfo> convert(EntityType entityType, PageData<? extends Event> pd) {
         return new PageData<>(pd.getData() == null ? null :
                 pd.getData().stream().map(e -> e.toInfo(entityType)).collect(Collectors.toList())
@@ -147,6 +160,10 @@ public class BaseEventService implements EventService {
 
     private List<EventInfo> convert(EntityType entityType, List<? extends Event> list) {
         return list == null ? null : list.stream().map(e -> e.toInfo(entityType)).collect(Collectors.toList());
+    }
+
+    private EventInfo convert(EntityType entityType, Event event) {
+        return Optional.ofNullable(event).map(e -> e.toInfo(entityType)).orElse(null);
     }
 
 }

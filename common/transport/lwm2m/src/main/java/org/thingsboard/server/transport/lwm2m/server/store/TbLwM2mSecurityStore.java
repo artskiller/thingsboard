@@ -1,22 +1,11 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
+// SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
 package org.thingsboard.server.transport.lwm2m.server.store;
 
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.leshan.core.SecurityMode;
+import org.eclipse.leshan.core.peer.OscoreIdentity;
 import org.eclipse.leshan.server.security.NonUniqueSecurityInfoException;
 import org.eclipse.leshan.server.security.SecurityInfo;
 import org.thingsboard.server.transport.lwm2m.secure.LwM2mCredentialsSecurityInfoValidator;
@@ -60,8 +49,9 @@ public class TbLwM2mSecurityStore implements TbMainSecurityStore {
         if (securityInfo == null) {
             securityInfo = fetchAndPutSecurityInfo(endpoint);
         } else if (securityInfo.usePSK() && securityInfo.getEndpoint().equals(SecurityMode.NO_SEC.toString())
-                && securityInfo.getIdentity().equals(SecurityMode.NO_SEC.toString())
+                && securityInfo.getPskIdentity().equals(SecurityMode.NO_SEC.toString())
                 && Arrays.equals(SecurityMode.NO_SEC.toString().getBytes(), securityInfo.getPreSharedKey())) {
+            log.info("securityInfo (null): [usePSK() & Endpoint == SecurityMode.NO_SEC]");
             return null;
         }
         return securityInfo;
@@ -79,6 +69,11 @@ public class TbLwM2mSecurityStore implements TbMainSecurityStore {
             }
         }
         return securityInfo;
+    }
+
+    @Override
+    public SecurityInfo getByOscoreIdentity(OscoreIdentity oscoreIdentity) {
+        return null;
     }
 
     public SecurityInfo fetchAndPutSecurityInfo(String credentialsId) {

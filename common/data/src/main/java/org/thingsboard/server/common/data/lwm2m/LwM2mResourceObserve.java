@@ -1,42 +1,28 @@
-/**
- * Copyright © 2016-2023 The Thingsboard Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-License-Identifier: Apache-2.0
 package org.thingsboard.server.common.data.lwm2m;
 
-import io.swagger.annotations.ApiModel;
-import io.swagger.annotations.ApiModelProperty;
+import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 
 import java.util.stream.Stream;
 
-@ApiModel
+@Schema
 @Data
 @AllArgsConstructor
 public class LwM2mResourceObserve {
-    @ApiModelProperty(position = 1, value = "LwM2M Resource Observe id.", example = "0")
+    @Schema(description = "LwM2M Resource Observe id.", example = "0")
     int id;
-    @ApiModelProperty(position = 2, value = "LwM2M Resource Observe name.", example = "Data")
+    @Schema(description = "LwM2M Resource Observe name.", example = "Data")
     String name;
-    @ApiModelProperty(position = 3, value = "LwM2M Resource Observe observe.", example = "false")
+    @Schema(description = "LwM2M Resource Observe observe.", example = "false")
     boolean observe;
-    @ApiModelProperty(position = 4, value = "LwM2M Resource Observe attribute.", example = "false")
+    @Schema(description = "LwM2M Resource Observe attribute.", example = "false")
     boolean attribute;
-    @ApiModelProperty(position = 5, value = "LwM2M Resource Observe telemetry.", example = "false")
+    @Schema(description = "LwM2M Resource Observe telemetry.", example = "false")
     boolean telemetry;
-    @ApiModelProperty(position = 6, value = "LwM2M Resource Observe key name.", example = "data")
+    @Schema(description = "LwM2M Resource Observe key name.", example = "data")
     String keyName;
 
     public LwM2mResourceObserve(int id, String name, boolean observe, boolean attribute, boolean telemetry) {

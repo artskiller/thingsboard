@@ -1,37 +1,24 @@
-///
-/// Copyright © 2016-2023 The Thingsboard Authors
-///
-/// Licensed under the Apache License, Version 2.0 (the "License");
-/// you may not use this file except in compliance with the License.
-/// You may obtain a copy of the License at
-///
-///     http://www.apache.org/licenses/LICENSE-2.0
-///
-/// Unless required by applicable law or agreed to in writing, software
-/// distributed under the License is distributed on an "AS IS" BASIS,
-/// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-/// See the License for the specific language governing permissions and
-/// limitations under the License.
-///
-
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-License-Identifier: Apache-2.0
 import {
   BackgroundSettings,
   BackgroundType,
   ColorProcessor,
   ColorSettings,
-  ColorType,
   ComponentStyle,
   constantColor,
   DateFormatSettings,
   Font,
   lastUpdateAgoDateFormat,
-  textStyle
+  textStyle,
+  ValueFormatProcessor
 } from '@shared/models/widget-settings.models';
-import { ComparisonResultType, DataKey, DatasourceData } from '@shared/models/widget.models';
-import { DataKeyType } from '@shared/models/telemetry/telemetry.models';
-import { AggregationType } from '@shared/models/time/time.models';
+import { DataEntry, DataKey, DatasourceData } from '@shared/models/widget.models';
+import { Injector } from '@angular/core';
+import { UnitService } from '@core/services/unit.service';
 
 export interface AggregatedValueCardWidgetSettings {
+  autoScale: boolean;
   showSubtitle: boolean;
   subtitle: string;
   subtitleFont: Font;
@@ -42,6 +29,7 @@ export interface AggregatedValueCardWidgetSettings {
   dateColor: string;
   showChart: boolean;
   background: BackgroundSettings;
+  padding: string;
 }
 
 export enum AggregatedValueCardKeyPosition {
@@ -79,10 +67,12 @@ export interface AggregatedValueCardValue {
   showArrow: boolean;
   upArrow: boolean;
   downArrow: boolean;
+  valueFormat: ValueFormatProcessor;
 }
 
 export const computeAggregatedCardValue =
-  (dataKeys: DataKey[], keyName: string, position: AggregatedValueCardKeyPosition): AggregatedValueCardValue => {
+  (dataKeys: DataKey[], keyName: string, position: AggregatedValueCardKeyPosition,
+   $injector: Injector, widgetDecimal: number): AggregatedValueCardValue => {
   const key = dataKeys.find(dataKey => ( dataKey.name === keyName && (dataKey.settings?.position === position ||
                                          (!dataKey.settings?.position && position === AggregatedValueCardKeyPosition.center)) ));
   if (key) {
@@ -90,18 +80,23 @@ export const computeAggregatedCardValue =
     return {
       key,
       value: '',
-      units: key.units,
-      style: textStyle(settings.font, '0.25px'),
+      units: $injector.get(UnitService).getTargetUnitSymbol(key.units),
+      style: textStyle(settings.font),
       color: ColorProcessor.fromSettings(settings.color),
       center: position === AggregatedValueCardKeyPosition.center,
       showArrow: settings.showArrow,
       upArrow: false,
-      downArrow: false
+      downArrow: false,
+      valueFormat: ValueFormatProcessor.fromSettings($injector, {
+        units: key.units,
+        decimals: key.decimals || widgetDecimal,
+        ignoreUnitSymbol: true,
+      })
     };
   }
 };
 
-export const getTsValueByLatestDataKey = (latestData: Array<DatasourceData>, dataKey: DataKey): [number, any] => {
+export const getTsValueByLatestDataKey = (latestData: Array<DatasourceData>, dataKey: DataKey): DataEntry => {
   if (latestData?.length) {
     const dsData = latestData.find(data => data.dataKey === dataKey);
     if (dsData?.data?.length) {
@@ -112,6 +107,7 @@ export const getTsValueByLatestDataKey = (latestData: Array<DatasourceData>, dat
 };
 
 export const aggregatedValueCardDefaultSettings: AggregatedValueCardWidgetSettings = {
+  autoScale: true,
   showSubtitle: true,
   subtitle: '${entityName}',
   subtitleFont: {
@@ -143,7 +139,8 @@ export const aggregatedValueCardDefaultSettings: AggregatedValueCardWidgetSettin
       color: 'rgba(255,255,255,0.72)',
       blur: 3
     }
-  }
+  },
+  padding: '18px'
 };
 
 export const aggregatedValueCardDefaultKeySettings: AggregatedValueCardKeySettings = {
@@ -159,72 +156,3 @@ export const aggregatedValueCardDefaultKeySettings: AggregatedValueCardKeySettin
   color: constantColor('rgba(0, 0, 0, 0.87)'),
   showArrow: false
 };
-
-export const createDefaultAggregatedValueLatestDataKeys = (keyName: string, units): DataKey[] => [
-    {
-      name: keyName, label: 'Latest', type: DataKeyType.timeseries, units, decimals: 0,
-      aggregationType: AggregationType.NONE,
-      settings: {
-        position: AggregatedValueCardKeyPosition.center,
-        font: {
-          family: 'Roboto',
-          size: 52,
-          sizeUnit: 'px',
-          style: 'normal',
-          weight: '500',
-          lineHeight: '1'
-        },
-        color: constantColor('rgba(0, 0, 0, 0.87)'),
-        showArrow: false
-      } as AggregatedValueCardKeySettings
-    },
-    {
-      name: keyName, label: 'Delta percent', type: DataKeyType.timeseries, units: '%', decimals: 0,
-      aggregationType: AggregationType.AVG,
-      comparisonEnabled: true,
-      timeForComparison: 'previousInterval',
-      comparisonResultType: ComparisonResultType.DELTA_PERCENT,
-      settings: {
-        position: AggregatedValueCardKeyPosition.rightTop,
-        font: {
-          family: 'Roboto',
-          size: 14,
-          sizeUnit: 'px',
-          style: 'normal',
-          weight: '500',
-          lineHeight: '1'
-        },
-        color: {
-          color: 'rgba(0, 0, 0, 0.87)',
-          type: ColorType.range,
-          rangeList: [
-            {to: 0, color: '#198038'},
-            {from: 0, to: 0, color: 'rgba(0, 0, 0, 0.87)'},
-            {from: 0, color: '#D12730'}
-          ],
-          colorFunction: ''
-        },
-        showArrow: true
-      } as AggregatedValueCardKeySettings
-    },
-    {
-      name: keyName, label: 'Delta absolute', type: DataKeyType.timeseries, units, decimals: 1,
-      aggregationType: AggregationType.AVG,
-      comparisonEnabled: true,
-      timeForComparison: 'previousInterval',
-      comparisonResultType: ComparisonResultType.DELTA_ABSOLUTE,
-      settings: {
-        position: AggregatedValueCardKeyPosition.rightBottom,
-        font: {
-          family: 'Roboto',
-          size: 11,
-          sizeUnit: 'px',
-          style: 'normal',
-          weight: '400',
-          lineHeight: '1'
-        },
-        color: constantColor('rgba(0, 0, 0, 0.38)'),
-        showArrow: false
-      } as AggregatedValueCardKeySettings
-    }
-  ];

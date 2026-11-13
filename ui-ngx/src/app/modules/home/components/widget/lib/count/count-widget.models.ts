@@ -1,19 +1,5 @@
-///
-/// Copyright © 2016-2023 The Thingsboard Authors
-///
-/// Licensed under the Apache License, Version 2.0 (the "License");
-/// you may not use this file except in compliance with the License.
-/// You may obtain a copy of the License at
-///
-///     http://www.apache.org/licenses/LICENSE-2.0
-///
-/// Unless required by applicable law or agreed to in writing, software
-/// distributed under the License is distributed on an "AS IS" BASIS,
-/// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-/// See the License for the specific language governing permissions and
-/// limitations under the License.
-///
-
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-License-Identifier: Apache-2.0
 import {
   ColorSettings,
   ColorType,
@@ -53,6 +39,7 @@ export const entityCountCardLayoutImages = new Map<CountCardLayout, string>(
 
 export interface CountWidgetSettings {
   layout: CountCardLayout;
+  autoScale: boolean;
   showLabel: boolean;
   label: string;
   labelFont: Font;
@@ -76,6 +63,7 @@ export interface CountWidgetSettings {
 
 export const countDefaultSettings = (alarmElseEntity: boolean): CountWidgetSettings => ({
   layout: CountCardLayout.column,
+  autoScale: true,
   showLabel: true,
   label: alarmElseEntity ? 'Total' : 'Devices',
   labelFont: {
@@ -99,10 +87,12 @@ export const countDefaultSettings = (alarmElseEntity: boolean): CountWidgetSetti
     ? {
       color: 'rgba(0, 105, 92, 1)',
       type: ColorType.range,
-      rangeList: [
-        {from: 0, to: 0, color: 'rgba(0, 105, 92, 1)'},
-        {from: 1, color: 'rgba(209, 39, 48, 1)'}
-      ],
+      rangeList: {
+        range: [
+          {from: 0, to: 0, color: 'rgba(0, 105, 92, 1)'},
+          {from: 1, color: 'rgba(209, 39, 48, 1)'}
+        ]
+      },
       colorFunction: defaultColorFunction
     }
     : constantColor('rgba(241, 141, 23, 1)'),

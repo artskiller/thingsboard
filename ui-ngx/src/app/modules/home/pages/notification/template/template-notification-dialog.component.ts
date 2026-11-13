@@ -1,26 +1,13 @@
-///
-/// Copyright © 2016-2023 The Thingsboard Authors
-///
-/// Licensed under the Apache License, Version 2.0 (the "License");
-/// you may not use this file except in compliance with the License.
-/// You may obtain a copy of the License at
-///
-///     http://www.apache.org/licenses/LICENSE-2.0
-///
-/// Unless required by applicable law or agreed to in writing, software
-/// distributed under the License is distributed on an "AS IS" BASIS,
-/// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-/// See the License for the specific language governing permissions and
-/// limitations under the License.
-///
-
-import { NotificationDeliveryMethod, NotificationTemplate, NotificationType } from '@shared/models/notification.models';
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
+// SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
+import { NotificationTemplate, NotificationType } from '@shared/models/notification.models';
 import { Component, Inject, OnDestroy, ViewChild } from '@angular/core';
 import { Store } from '@ngrx/store';
 import { AppState } from '@core/core.state';
 import { Router } from '@angular/router';
 import { MAT_DIALOG_DATA, MatDialogRef } from '@angular/material/dialog';
-import { FormBuilder } from '@angular/forms';
+import { FormBuilder, FormGroup } from '@angular/forms';
 import { NotificationService } from '@core/http/notification.service';
 import { deepClone, isDefinedAndNotNull } from '@core/utils';
 import { Observable } from 'rxjs';
@@ -31,8 +18,6 @@ import { BreakpointObserver } from '@angular/cdk/layout';
 import { MediaBreakpoints } from '@shared/models/constants';
 import { TranslateService } from '@ngx-translate/core';
 import { TemplateConfiguration } from '@home/pages/notification/template/template-configuration';
-import { AuthState } from '@core/auth/auth.models';
-import { getCurrentAuthState } from '@core/auth/auth.selectors';
 import { AuthUser } from '@shared/models/user.model';
 import { Authority } from '@shared/models/authority.enum';
 
@@ -41,12 +26,15 @@ export interface TemplateNotificationDialogData {
   predefinedType?: NotificationType;
   isAdd?: boolean;
   isCopy?: boolean;
+  name?: string;
+  readonly?: boolean;
 }
 
 @Component({
-  selector: 'tb-template-notification-dialog',
-  templateUrl: './template-notification-dialog.component.html',
-  styleUrls: ['./template-notification-dialog.component.scss']
+    selector: 'tb-template-notification-dialog',
+    templateUrl: './template-notification-dialog.component.html',
+    styleUrls: ['./template-notification-dialog.component.scss'],
+    standalone: false
 })
 export class TemplateNotificationDialogComponent
   extends TemplateConfiguration<TemplateNotificationDialogComponent, NotificationTemplate> implements OnDestroy {
@@ -62,9 +50,9 @@ export class TemplateNotificationDialogComponent
   selectedIndex = 0;
   hideSelectType = false;
 
+  notificationTemplateConfigurationForm: FormGroup;
+
   private readonly templateNotification: NotificationTemplate;
-  private authState: AuthState = getCurrentAuthState(this.store);
-  private authUser: AuthUser = this.authState.authUser;
 
   constructor(protected store: Store<AppState>,
               protected router: Router,
@@ -85,6 +73,9 @@ export class TemplateNotificationDialogComponent
       this.hideSelectType = true;
       this.templateNotificationForm.get('notificationType').setValue(this.data.predefinedType, {emitEvent: false});
     }
+    if (isDefinedAndNotNull(this.data?.name)) {
+      this.templateNotificationForm.get('name').setValue(this.data.name, {emitEvent: false});
+    }
 
     if (data.isAdd || data.isCopy) {
       this.dialogTitle = 'notification.add-notification-template';
@@ -92,6 +83,12 @@ export class TemplateNotificationDialogComponent
     this.templateNotification = deepClone(this.data.template);
 
     if (this.templateNotification) {
+      if (this.isSysAdmin()) {
+        this.notificationTypes.push(
+          NotificationType.USER_REGISTERED,
+          NotificationType.USER_ACTIVATED
+        );
+      }
       if (this.data.isCopy) {
         this.templateNotification.name += ` (${this.translate.instant('action.copy')})`;
       } else {
@@ -99,11 +96,18 @@ export class TemplateNotificationDialogComponent
       }
       this.templateNotificationForm.reset({}, {emitEvent: false});
       this.templateNotificationForm.patchValue(this.templateNotification, {emitEvent: false});
-      // eslint-disable-next-line guard-for-in
-      for (const method in this.templateNotification.configuration.deliveryMethodsTemplates) {
-        this.deliveryMethodFormsMap.get(NotificationDeliveryMethod[method])
-          .patchValue(this.templateNotification.configuration.deliveryMethodsTemplates[method]);
-      }
+      this.notificationTemplateConfigurationForm.patchValue({
+        deliveryMethodsTemplates: this.templateNotification.configuration.deliveryMethodsTemplates
+      }, {emitEvent: false});
+      this.deliveryConfiguration = this.templateNotificationForm.get('configuration.deliveryMethodsTemplates').value;
+    }
+
+    if(data?.readonly) {
+      this.dialogTitle = 'notification.view-notification-template';
+      this.templateNotificationForm.disable({emitEvent: false});
+    } else {
+      this.updateValidators();
+      this.updateAttachReportValidators();
     }
   }
 
@@ -119,6 +123,9 @@ export class TemplateNotificationDialogComponent
 
   changeStep($event: StepperSelectionEvent) {
     this.selectedIndex = $event.selectedIndex;
+    if ($event.previouslySelectedIndex > $event.selectedIndex) {
+      $event.previouslySelectedStep.interacted = false;
+    }
   }
 
   backStep() {
@@ -140,7 +147,7 @@ export class TemplateNotificationDialogComponent
     return 'action.next';
   }
 
-  private get maxStepperIndex(): number {
+  get maxStepperIndex(): number {
     return this.notificationTemplateStepper?._steps?.length - 1;
   }
 
@@ -168,16 +175,18 @@ export class TemplateNotificationDialogComponent
     });
   }
 
-  private isSysAdmin(): boolean {
-    return this.authUser.authority === Authority.SYS_ADMIN;
-  }
-
   private allowNotificationType(): NotificationType[] {
     const sysAdminAllowNotificationTypes = new Set([
       NotificationType.ENTITIES_LIMIT,
+      NotificationType.ENTITIES_LIMIT_INCREASE_REQUEST,
+      NotificationType.ADDON_ACCESS_REQUEST,
+      NotificationType.ADDON_ACCESS_ERROR,
+      NotificationType.PLAN_UPGRADE_REQUEST,
       NotificationType.API_USAGE_LIMIT,
       NotificationType.NEW_PLATFORM_VERSION,
-      NotificationType.RATE_LIMITS
+      NotificationType.RATE_LIMITS,
+      NotificationType.TASK_PROCESSING_FAILURE,
+      NotificationType.RESOURCES_SHORTAGE
     ]);
 
     if (this.isSysAdmin()) {
